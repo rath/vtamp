@@ -356,6 +356,7 @@ the desktop integration cannot initialize.
 | `gg` / `G` | Select the first / last entry in the focused list; Library jumps across pages in the current search results |
 | `zz` | Jump the Queue selection to the now-playing entry and scroll it into view, centered when the ends leave room; clears a queue filter that hides it |
 | `/` | Search the focused list: title/artist/album on Library, a queue filter on Queue. Results follow what you type (the Queue filters instantly, the Library search starts when typing pauses). Enter keeps it (empty clears), Esc restores the filter from before. Outside the prompt, `Esc` clears it |
+| `f` | Cycle the Library kind filter: all → video → radio. It combines with the `/` search, shows in the panel title, resets to the first page, and `Esc` clears it together with the search |
 | `Ctrl-U` | Clear the text in a search, folder, or track-editor field |
 | `a` | Add a folder, stream URL, or M3U/PLS channel list |
 | `R` | Rescan registered folders |
@@ -671,8 +672,8 @@ Run `vtamp --help` or `vtamp COMMAND --help` for argument details. All non-TUI c
 | `library cover refresh [TRACK_ID\|all] [--wait]` | Re-fetch thumbnails and rebuild square covers; every managed YouTube import unless a track ID is given |
 | `library cover status JOB_ID` | Inspect a cover refresh job; reports live in server memory only |
 | `library track ID` | Read one indexed track |
-| `library list [--offset N] [--limit N]` | List indexed tracks, default 200, maximum 1000 per page |
-| `library search [QUERY] [--title TEXT] [--artist TEXT] [--album TEXT] [--exact] [--exclude TEXT]` | Combine normalized field filters and exclusions; supports pagination |
+| `library list [--offset N] [--limit N] [--kind audio\|video\|radio]` | List indexed tracks, default 200, maximum 1000 per page, optionally one catalog kind |
+| `library search [QUERY] [--title TEXT] [--artist TEXT] [--album TEXT] [--exact] [--exclude TEXT] [--kind audio\|video\|radio]` | Combine normalized field filters, exclusions, and a kind; supports pagination |
 | `library roots` | Show registered roots |
 | `library export FILE` | Export all audio with embedded tags/covers, playable videos and radio registrations |
 | `library import FILE [--dry-run]` | Validate or merge a Library archive; waits for completion by default |
@@ -773,11 +774,11 @@ vtamp watch --json
 Every JSON response has a protocol version and `ok`. Successful responses have `data`; failures have an error code and message. Times are integer milliseconds, volume is an integer from 0 to 100, and playback status is `playing`, `paused`, or `stopped`.
 
 ```json
-{"version":11,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
+{"version":12,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
 ```
 
 ```json
-{"version":11,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
+{"version":12,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
 ```
 
 `status` returns `queue`, `current_id`, `status`, `position_ms`, `volume`, `normalization`, `shuffle`, `repeat`, `revision`, `queue_revision`, `play_next`, `scheduled_stop`, `scanning`, and `last_error`. Each queue entry contains `id` and `track`; each track includes its library ID, path, title, artist, album, track number, duration, and optional local cover path. `current_id` identifies a **queue entry**, not a library track. It is null before a current entry is selected. A stopped player may still have a selected entry.
@@ -787,7 +788,7 @@ Every JSON response has a protocol version and `ok`. Successful responses have `
 `watch --json` emits one response envelope per line (NDJSON), starting with a `state` event. Later events are `state`, `progress`, `library_changed`, `scan_completed`, and `shutdown`:
 
 ```json
-{"version":11,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
+{"version":12,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
 ```
 
 State events contain the full state; progress events update position for their matching state revision. Heartbeats occur about once a second, including while paused. A slow subscriber gets a fresh state after event-buffer lag. `Ctrl+C` stops watching without stopping playback.
@@ -804,6 +805,7 @@ examples are placeholders to replace with IDs returned by vtamp.
 vtamp now --json
 vtamp library search --artist "DAY6" --title "HAPPY" --exact --json
 vtamp library search 'love' --exclude 'live' --limit 20 --json
+vtamp library search --kind video --json
 vtamp library track TRACK_ID --json
 vtamp queue add --tracks TRACK_A TRACK_B --after-current --json
 vtamp queue list --offset 0 --limit 20 --json
@@ -820,7 +822,10 @@ same Unicode normalization and lowercasing as ordinary search. Matching is by
 substring unless `--exact` is present; exact matching applies only to field
 filters and requires at least one. The optional positional query searches the
 combined title/artist/album text. Each `--exclude TEXT` removes matches from
-that combined text. This is metadata search, not mood or audio analysis.
+that combined text. `--kind` keeps one row kind: `audio` (local files without
+saved video), `video` (files with a saved video sidecar), or `radio` (registered
+streams); each track carries `"video": true` when a sidecar exists. This is
+metadata search, not mood or audio analysis.
 
 `--tracks` adds library tracks as one batch, including intentional duplicates.
 `--after-current` also works with a single `--track`: it inserts after the current
@@ -937,12 +942,12 @@ and `queue_item_id`, or `kind: "deadline"` and `deadline_ms` (Unix milliseconds)
 
 ### Updating from older protocol versions
 
-This build uses **protocol 11** and migrates the library to **database version 7**
+This build uses **protocol 12** and migrates the library to **database version 8**
 when the new server starts. Stop an older running server using its matching old
 binary before starting the new binary, then reattach TUIs. Restart restores the
 selected track paused and clears stop reservations. Track IDs, queue entries,
 position, volume, and play-next entries are preserved. Binaries that do not
-support database version 7 cannot open the migrated database.
+support database version 8 cannot open the migrated database.
 
 Optional native radio verification uses an isolated, muted server and generated
 silence, including HTTP redirects, token renewal, deliberate network failure,

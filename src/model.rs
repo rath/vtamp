@@ -2,7 +2,28 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
+
+/// What a catalog row is: a local audio file, a file with a managed silent
+/// video sidecar, or a registered radio stream. Every row has exactly one kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Audio,
+    Video,
+    Radio,
+}
+
+impl Kind {
+    /// The wire name, also stored in the catalog's `kind` column.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Audio => "audio",
+            Kind::Video => "video",
+            Kind::Radio => "radio",
+        }
+    }
+}
 
 /// Untagged to retain the existing on-disk and wire representation of files.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +76,10 @@ pub struct Track {
     pub track_number: u32,
     pub duration_ms: Option<u64>,
     pub cover: Option<PathBuf>,
+    /// A managed silent video sidecar exists next to this file. Scans, video
+    /// publication, and archive restores keep it current; streams never set it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub video: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<crate::youtube::Source>,
 }
@@ -62,6 +87,15 @@ pub struct Track {
 impl Track {
     pub fn is_live(&self) -> bool {
         self.playback.is_live()
+    }
+    pub fn kind(&self) -> Kind {
+        if self.is_live() {
+            Kind::Radio
+        } else if self.video {
+            Kind::Video
+        } else {
+            Kind::Audio
+        }
     }
     pub fn time_label(&self) -> String {
         self.duration_ms
@@ -344,6 +378,9 @@ pub enum Command {
         limit: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<String>,
+        /// Restrict the page to one catalog kind; omitted lists every kind.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<Kind>,
     },
     LibraryRoots,
 }
@@ -494,6 +531,8 @@ pub struct SearchFilter {
     pub album: Option<String>,
     pub exclude: Vec<String>,
     pub exact: bool,
+    /// Restrict matches to one catalog kind; null matches every kind.
+    pub kind: Option<Kind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

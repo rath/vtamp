@@ -156,7 +156,7 @@ fn archive_roundtrip_preserves_assets_overrides_rescans_and_session() {
     );
     store.replace_catalog(&scan.records).unwrap();
     assert_eq!(store.track(&youtube.track.id).unwrap().unwrap().album, "");
-    assert_eq!(store.search("", 0, 10).unwrap().1, 3);
+    assert_eq!(store.search("", None, 0, 10).unwrap().1, 3);
 
     store
         .edit_metadata(
@@ -628,6 +628,7 @@ fn readable_names_keep_unicode_and_disambiguate_sanitized_or_duplicate_titles() 
         track_number: 0,
         duration_ms: None,
         cover: None,
+        video: false,
         source: None,
     };
     assert_eq!(readable_name(&track, &mut used), "김동률 - 감사");

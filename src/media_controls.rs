@@ -258,6 +258,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(60_000),
             cover: None,
+            video: false,
             source: None,
         };
         let item = QueueItem::new(track);

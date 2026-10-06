@@ -235,6 +235,7 @@ impl Store {
                     duration_ms: Some(0),
                     track_number: 0,
                     cover: None,
+                    video: false,
                     source: Some(m.source),
                 },
                 modified: 0,
@@ -367,7 +368,45 @@ pub(super) fn apply_metadata(tx: &rusqlite::Transaction<'_>, track: &mut Track) 
 }
 pub(super) fn write_record(tx: &rusqlite::Transaction<'_>, record: &Record) -> Result<()> {
     let t = &record.track;
-    tx.execute("INSERT INTO tracks(id,path,search,json,title_search,artist_search,album_search) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET path=excluded.path,search=excluded.search,json=excluded.json,title_search=excluded.title_search,artist_search=excluded.artist_search,album_search=excluded.album_search",params![t.id,t.playback.file().context("Catalog entry is not a file")?.to_string_lossy(),search_blob(t),serde_json::to_string(record)?,normalized(&t.title),normalized(&t.artist),normalized(&t.album)])?;
+    tx.execute("INSERT INTO tracks(id,path,search,json,title_search,artist_search,album_search,kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET path=excluded.path,search=excluded.search,json=excluded.json,title_search=excluded.title_search,artist_search=excluded.artist_search,album_search=excluded.album_search,kind=excluded.kind",params![t.id,t.playback.file().context("Catalog entry is not a file")?.to_string_lossy(),search_blob(t),serde_json::to_string(record)?,normalized(&t.title),normalized(&t.artist),normalized(&t.album),t.kind().name()])?;
+    Ok(())
+}
+
+/// Version 8: mark indexed files whose managed video sidecar exists, in the
+/// catalog and in saved queue copies, so the kind filter and row labels agree.
+pub(super) fn migrate_kinds(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let rows = tx
+        .prepare("SELECT json FROM tracks")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut videos = std::collections::HashSet::new();
+    for json in rows {
+        let mut record: Record = serde_json::from_str(&json)?;
+        if crate::video::sidecar(&record.track).is_none() {
+            continue;
+        }
+        record.track.video = true;
+        write_record(tx, &record)?;
+        videos.insert(record.track.id);
+    }
+    if videos.is_empty() {
+        return Ok(());
+    }
+    let saved: Option<String> = tx
+        .query_row("SELECT json FROM session WHERE id=1", [], |r| r.get(0))
+        .optional()?;
+    if let Some(json) = saved {
+        let mut state: State = serde_json::from_str(&json)?;
+        for item in state.queue.iter_mut().chain(state.direct.as_deref_mut()) {
+            if videos.contains(&item.track.id) {
+                item.track.video = true;
+            }
+        }
+        tx.execute(
+            "UPDATE session SET json=?1 WHERE id=1",
+            [serde_json::to_string(&state)?],
+        )?;
+    }
     Ok(())
 }
 
@@ -591,6 +630,7 @@ mod tests {
                     track_number: 0,
                     duration_ms: Some(180_000),
                     cover: None,
+                    video: false,
                     source: Some(source.clone()),
                 },
                 modified: 0,
@@ -637,8 +677,8 @@ mod tests {
             store.track("structured").unwrap().unwrap().title,
             "Manual title"
         );
-        assert_eq!(store.search("Unknown album", 0, 10).unwrap().1, 0);
-        assert_eq!(store.search("Source album", 0, 10).unwrap().1, 1);
+        assert_eq!(store.search("Unknown album", None, 0, 10).unwrap().1, 0);
+        assert_eq!(store.search("Source album", None, 0, 10).unwrap().1, 1);
         let restored = store.restore().unwrap();
         assert_eq!(restored.volume, state.volume);
         assert_eq!(restored.position_ms, state.position_ms);

@@ -206,6 +206,7 @@ impl Runtime {
         &mut self,
         paths: &Paths,
         store: &mut Store,
+        engine: &mut Engine<Box<dyn PlaybackBackend>>,
         tx: &mpsc::SyncSender<Work>,
         scanning: bool,
         events: &broadcast::Sender<Event>,
@@ -225,6 +226,11 @@ impl Runtime {
                         .video_record(&p.item.video_id)?
                         .context("Imported track disappeared")?;
                     jobs::publish_video(paths, &p, &record)?;
+                    // Flag the indexed row and queued copies now; a file that
+                    // is not indexed yet gets its flag from the next scan.
+                    if let Some(track) = store.set_video(&record.track.id)? {
+                        update_queue_metadata(&track, engine, store, events)?;
+                    }
                     store.save_import(&p.job, Some(&p.item))?;
                     Ok(())
                 })();

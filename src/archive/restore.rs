@@ -192,6 +192,7 @@ pub(crate) fn prepare(
                 stop,
                 progress,
             )?;
+            track.video = true;
             progress.end();
             progress.begin("preparing", report.added, None);
             progress.item(done, &track.title);

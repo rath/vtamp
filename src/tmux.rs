@@ -114,6 +114,7 @@ mod tests {
             track_number: 0,
             duration_ms: Some(219_103),
             cover: None,
+            video: false,
             source: None,
         });
         State {

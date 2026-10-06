@@ -2,7 +2,7 @@ mod archive;
 mod imports;
 use crate::{
     library::{Record, normalized, search_blob},
-    model::{ApiError, PlaybackStatus, Reply, ScanJob, SearchFilter, State, Track},
+    model::{ApiError, Kind, PlaybackStatus, Reply, ScanJob, SearchFilter, State, Track},
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -18,6 +18,8 @@ pub struct LibraryPage {
     pub total: usize,
     pub offset: usize,
     pub query: String,
+    /// The kind restriction that still applies; null once it would hide the anchor.
+    pub kind: Option<Kind>,
 }
 
 impl Store {
@@ -26,7 +28,7 @@ impl Store {
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 7 {
+        if version > 8 {
             bail!("Database was created by a newer vtamp; please upgrade");
         }
         if version == 0 {
@@ -69,6 +71,9 @@ impl Store {
         if version < 4 {
             let tx = db.transaction()?;
             tx.execute_batch("ALTER TABLE track_metadata ADD COLUMN album_override TEXT;")?;
+            // The record writer stores the kind column; give the table one
+            // before the album migration rewrites rows.
+            ensure_kind_column(&tx, "tracks", "audio")?;
             imports::migrate_albums(&tx)?;
             tx.pragma_update(None, "user_version", 4)?;
             tx.commit()?;
@@ -91,6 +96,20 @@ impl Store {
                 PRAGMA user_version = 7;
                 COMMIT;",
             )?;
+        }
+        if version < 8 {
+            // The catalog view is a positional UNION, so both tables gain the
+            // column and the view is rebuilt with explicit columns.
+            let tx = db.transaction()?;
+            tx.execute_batch("DROP VIEW IF EXISTS catalog;")?;
+            ensure_kind_column(&tx, "tracks", "audio")?;
+            ensure_kind_column(&tx, "streams", "radio")?;
+            tx.execute_batch(
+                "CREATE VIEW catalog AS SELECT id,path,search,json,title_search,artist_search,album_search,kind FROM tracks UNION ALL SELECT id,path,search,json,title_search,artist_search,album_search,kind FROM streams;",
+            )?;
+            imports::migrate_kinds(&tx)?;
+            tx.pragma_update(None, "user_version", 8)?;
+            tx.commit()?;
         }
         Ok(Self { db })
     }
@@ -193,15 +212,23 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    pub fn search(&self, query: &str, offset: usize, limit: usize) -> Result<(Vec<Track>, usize)> {
+    /// Page the catalog by substring and, when `kind` is set, by one row kind.
+    pub fn search(
+        &self,
+        query: &str,
+        kind: Option<Kind>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<Track>, usize)> {
         let query = normalized(query);
+        let kind = kind.map_or("", Kind::name);
         let total: i64 = self.db.query_row(
-            "SELECT count(*) FROM catalog WHERE instr(search,?1)>0",
-            [&query],
+            "SELECT count(*) FROM catalog WHERE instr(search,?1)>0 AND (?2='' OR kind=?2)",
+            params![query, kind],
             |r| r.get(0),
         )?;
-        let strings = self.db.prepare("SELECT json FROM catalog WHERE instr(search,?1)>0 ORDER BY search,path LIMIT ?2 OFFSET ?3")?
-            .query_map(params![query, limit.clamp(1, 1000) as i64, i64::try_from(offset)?], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let strings = self.db.prepare("SELECT json FROM catalog WHERE instr(search,?1)>0 AND (?2='' OR kind=?2) ORDER BY search,path LIMIT ?3 OFFSET ?4")?
+            .query_map(params![query, kind, limit.clamp(1, 1000) as i64, i64::try_from(offset)?], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
         let tracks = strings
             .into_iter()
             .map(|s| serde_json::from_str::<Record>(&s).map(|r| r.track))
@@ -209,13 +236,22 @@ impl Store {
         Ok((tracks, total as usize))
     }
     /// Locate an identity in the same ordering as search, without loading the
-    /// whole catalog. Drop the filter only when it would hide the target.
-    pub fn search_around(&self, query: &str, id: &str, limit: usize) -> Result<LibraryPage> {
-        let (search, path): (String, String) = self
+    /// whole catalog. Drop a filter only when it would hide the target; the
+    /// query and the kind are dropped independently.
+    pub fn search_around(
+        &self,
+        query: &str,
+        kind: Option<Kind>,
+        id: &str,
+        limit: usize,
+    ) -> Result<LibraryPage> {
+        let (search, path, row_kind): (String, String, String) = self
             .db
-            .query_row("SELECT search,path FROM catalog WHERE id=?1", [id], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT search,path,kind FROM catalog WHERE id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .optional()?
             .ok_or_else(|| ApiError::new("track_not_found", "Library track not found"))?;
         let query = if search.contains(&normalized(query)) {
@@ -223,19 +259,21 @@ impl Store {
         } else {
             ""
         };
+        let kind = kind.filter(|kind| kind.name() == row_kind);
         let rank: i64 = self.db.query_row(
-            "SELECT count(*) FROM catalog WHERE instr(search,?1)>0 AND (search,path)<(?2,?3)",
-            params![normalized(query), search, path],
+            "SELECT count(*) FROM catalog WHERE instr(search,?1)>0 AND (?2='' OR kind=?2) AND (search,path)<(?3,?4)",
+            params![normalized(query), kind.map_or("", Kind::name), search, path],
             |r| r.get(0),
         )?;
         let limit = limit.clamp(1, 1000);
         let offset = usize::try_from(rank)? / limit * limit;
-        let (tracks, total) = self.search(query, offset, limit)?;
+        let (tracks, total) = self.search(query, kind, offset, limit)?;
         Ok(LibraryPage {
             tracks,
             total,
             offset,
             query: query.into(),
+            kind,
         })
     }
     pub fn search_filtered(
@@ -274,6 +312,10 @@ impl Store {
         for value in &filter.exclude {
             predicates.push("instr(search,?)=0".into());
             values.push(normalized(value));
+        }
+        if let Some(kind) = filter.kind {
+            predicates.push("kind=?".into());
+            values.push(kind.name().into());
         }
         let condition = predicates.join(" AND ");
         let total: i64 = self.db.query_row(
@@ -421,6 +463,27 @@ impl Store {
             .transpose()?)
     }
 
+    /// Record a published video sidecar on an indexed track. Returns the track
+    /// as stored, or `None` when the file is not indexed yet; the next scan
+    /// then detects the sidecar itself.
+    pub fn set_video(&mut self, id: &str) -> Result<Option<Track>> {
+        let json: Option<String> = self
+            .db
+            .query_row("SELECT json FROM tracks WHERE id=?1", [id], |r| r.get(0))
+            .optional()?;
+        let Some(json) = json else {
+            return Ok(None);
+        };
+        let mut record: Record = serde_json::from_str(&json)?;
+        if !record.track.video {
+            record.track.video = true;
+            let tx = self.db.transaction()?;
+            imports::write_record(&tx, &record)?;
+            tx.commit()?;
+        }
+        Ok(Some(record.track))
+    }
+
     /// Point a track at a regenerated cover file without touching its metadata.
     pub fn set_cover(&mut self, id: &str, cover: &Path) -> Result<Track> {
         let json: String = self
@@ -456,7 +519,7 @@ impl Store {
                 modified: 0,
                 bytes: 0,
             };
-            let count = tx.execute("INSERT INTO streams(id,path,search,json,title_search,artist_search,album_search) VALUES(?1,?2,?3,?4,?3,'','') ON CONFLICT(path) DO NOTHING", params![track.id, entry.url, normalized(&entry.name), serde_json::to_string(&record)?])?;
+            let count = tx.execute("INSERT INTO streams(id,path,search,json,title_search,artist_search,album_search,kind) VALUES(?1,?2,?3,?4,?3,'','','radio') ON CONFLICT(path) DO NOTHING", params![track.id, entry.url, normalized(&entry.name), serde_json::to_string(&record)?])?;
             if first_registered_id.is_none() {
                 first_registered_id = Some(tx.query_row(
                     "SELECT id FROM streams WHERE path=?1",
@@ -481,6 +544,22 @@ impl Store {
         }
         Ok(())
     }
+}
+
+/// Add the `kind` column when the table lacks it. Migrations stay idempotent
+/// because tests and recovery rewind `user_version` on a current schema.
+fn ensure_kind_column(tx: &rusqlite::Transaction<'_>, table: &str, default: &str) -> Result<()> {
+    let present: i64 = tx.query_row(
+        &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name='kind'"),
+        [],
+        |r| r.get(0),
+    )?;
+    if present == 0 {
+        tx.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN kind TEXT NOT NULL DEFAULT '{default}';"
+        ))?;
+    }
+    Ok(())
 }
 
 fn write_catalog(tx: &rusqlite::Transaction<'_>, records: &[Record]) -> Result<()> {
@@ -571,7 +650,7 @@ mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
                 .unwrap(),
-            7
+            8
         );
     }
 
@@ -594,8 +673,8 @@ mod tests {
         store
             .replace_catalog(&[record("file", "A", "Artist", "")])
             .unwrap();
-        assert_eq!(store.search("", 0, 10).unwrap().1, 2);
-        let page = store.search_around("", id, 1).unwrap();
+        assert_eq!(store.search("", None, 0, 10).unwrap().1, 2);
+        let page = store.search_around("", None, id, 1).unwrap();
         assert_eq!(page.tracks[0].id, id);
         assert_eq!(page.offset, 1);
         assert_eq!(
@@ -634,7 +713,7 @@ mod tests {
             },
         ];
         assert!(store.add_streams(&entries).is_err());
-        assert_eq!(store.search("", 0, 10).unwrap().1, 0);
+        assert_eq!(store.search("", None, 0, 10).unwrap().1, 0);
     }
     #[test]
     fn v5_file_sessions_migrate_and_live_sessions_restore_without_position() {
@@ -749,6 +828,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(30000),
             cover: None,
+            video: false,
             source: None,
         });
         let state = State {
@@ -778,6 +858,7 @@ mod tests {
                 track_number: 1,
                 duration_ms: Some(1000),
                 cover: None,
+                video: false,
                 source: None,
             },
             modified: 1,
@@ -795,22 +876,141 @@ mod tests {
             .collect();
         records.push(record("other", "Before", "Other", ""));
         store.replace_catalog(&records).unwrap();
-        let page = store.search_around("artist", "425", 200).unwrap();
+        let page = store.search_around("artist", None, "425", 200).unwrap();
         assert_eq!(page.query, "artist");
         assert_eq!((page.offset, page.total, page.tracks.len()), (400, 450, 50));
         assert_eq!(page.tracks[25].id, "425");
-        let all = store.search_around("unrelated search", "425", 200).unwrap();
+        let all = store
+            .search_around("unrelated search", None, "425", 200)
+            .unwrap();
         assert_eq!(all.query, "");
         assert_eq!((all.offset, all.total), (400, 451));
-        let expected = store.search("", 400, 200).unwrap().0;
+        let expected = store.search("", None, 400, 200).unwrap().0;
         assert_eq!(all.tracks, expected);
         assert!(all.tracks.iter().any(|track| track.id == "425"));
-        assert!(store.search_around("", "deleted", 200).is_err());
+        assert!(store.search_around("", None, "deleted", 200).is_err());
         // Clamp the page size before calculating the page boundary.
-        let one = store.search_around("artist", "425", 0).unwrap();
+        let one = store.search_around("artist", None, "425", 0).unwrap();
         assert_eq!(one.offset, 425);
         assert_eq!(one.tracks.len(), 1);
         assert_eq!(one.tracks[0].id, "425");
+    }
+
+    /// A managed download directory the scan and migration recognize: the
+    /// audio file, its manifest, and optionally a silent video sidecar.
+    fn managed_record(root: &Path, video_id: &str, id: &str, video: bool) -> Record {
+        let dir = root.join(video_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("audio.m4a"), b"").unwrap();
+        if video {
+            std::fs::write(dir.join(crate::video::FILE), b"").unwrap();
+        }
+        let source = crate::youtube::Source {
+            video_id: video_id.into(),
+            ..Default::default()
+        };
+        let manifest = crate::imports::Manifest {
+            track_id: id.into(),
+            source: source.clone(),
+            metadata: crate::metadata::Metadata {
+                title: id.into(),
+                artist: "Artist".into(),
+                method: "test".into(),
+                warning: None,
+            },
+            title_override: None,
+            artist_override: None,
+        };
+        std::fs::write(
+            dir.join("source.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut record = record(id, id, "Artist", "");
+        record.track.playback = crate::model::PlaybackSource::File {
+            path: dir.join("audio.m4a"),
+        };
+        record.track.source = Some(source);
+        record
+    }
+
+    #[test]
+    fn version_eight_marks_video_sidecars_and_filters_kinds() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("old.db");
+        let with_video = managed_record(home.path(), "lO3lG-qXU14", "clip", true);
+        let audio_only = managed_record(home.path(), "dQw4w9WgXcQ", "song", false);
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("CREATE TABLE session(id INTEGER PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE roots(path TEXT PRIMARY KEY); CREATE TABLE tracks(id TEXT PRIMARY KEY,path TEXT UNIQUE NOT NULL,search TEXT NOT NULL,json TEXT NOT NULL); PRAGMA user_version=1;").unwrap();
+        for r in [&with_video, &audio_only] {
+            db.execute(
+                "INSERT INTO tracks VALUES(?1,?2,?3,?4)",
+                params![
+                    r.track.id,
+                    r.track.playback.file().unwrap().to_string_lossy(),
+                    search_blob(&r.track),
+                    serde_json::to_string(r).unwrap()
+                ],
+            )
+            .unwrap();
+        }
+        let state = State {
+            queue: vec![
+                QueueItem::new(with_video.track.clone()),
+                QueueItem::new(audio_only.track.clone()),
+            ],
+            ..Default::default()
+        };
+        db.execute(
+            "INSERT INTO session(id,json) VALUES(1,?1)",
+            [serde_json::to_string(&state).unwrap()],
+        )
+        .unwrap();
+        drop(db);
+        let mut store = Store::open(&path).unwrap();
+        let (videos, total) = store.search("", Some(Kind::Video), 0, 10).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(videos[0].id, "clip");
+        assert!(videos[0].video);
+        let (audio, _) = store.search("", Some(Kind::Audio), 0, 10).unwrap();
+        assert_eq!(
+            audio.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["song"]
+        );
+        assert!(!audio[0].video);
+        assert_eq!(store.search("", None, 0, 10).unwrap().1, 2);
+        // Saved queue copies carry the flag so row labels agree with Library.
+        let queue = store.restore().unwrap().queue;
+        assert!(queue[0].track.video && !queue[1].track.video);
+        // Streams are radio rows; the plain query still sees every kind.
+        store
+            .add_streams(&[crate::streams::Entry {
+                name: "Radio".into(),
+                url: "https://example.com/live".into(),
+            }])
+            .unwrap();
+        let (radio, total) = store.search("", Some(Kind::Radio), 0, 10).unwrap();
+        assert_eq!((radio.len(), total), (1, 1));
+        assert!(radio[0].is_live());
+        assert_eq!(store.search("", None, 0, 10).unwrap().1, 3);
+        let filter = SearchFilter {
+            kind: Some(Kind::Video),
+            ..Default::default()
+        };
+        assert_eq!(store.search_filtered(&filter, 0, 10).unwrap().1, 1);
+        // Locating a track drops only a kind that would hide it.
+        let page = store
+            .search_around("", Some(Kind::Radio), "clip", 10)
+            .unwrap();
+        assert_eq!((page.kind, page.total), (None, 3));
+        let page = store
+            .search_around("", Some(Kind::Video), "clip", 10)
+            .unwrap();
+        assert_eq!((page.kind, page.total), (Some(Kind::Video), 1));
+        // A published sidecar flips the indexed row without a rescan.
+        assert!(store.set_video("song").unwrap().is_some_and(|t| t.video));
+        assert_eq!(store.search("", Some(Kind::Video), 0, 10).unwrap().1, 2);
+        assert!(store.set_video("missing").unwrap().is_none());
     }
 
     #[test]
@@ -846,7 +1046,7 @@ mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            7
+            8
         );
         let filter = SearchFilter {
             exclude: vec!["LIVE".into()],
@@ -885,7 +1085,7 @@ mod tests {
                 .replace_catalog(&[records[0].clone(), records[0].clone()])
                 .is_err()
         );
-        assert_eq!(store.search("", 0, 10).unwrap().1, 3);
+        assert_eq!(store.search("", None, 0, 10).unwrap().1, 3);
     }
     #[test]
     fn receipt_expiry_capacity_and_failed_commit_are_transactional() {

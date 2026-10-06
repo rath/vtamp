@@ -19,8 +19,8 @@ impl Store {
         )?;
         let version: u32 = snapshot.pragma_query_value(None, "user_version", |r| r.get(0))?;
         anyhow::ensure!(
-            matches!(version, 6 | 7),
-            "Library archive requires database version 6 or 7"
+            matches!(version, 6..=8),
+            "Library archive requires database version 6 to 8"
         );
         Self { db: snapshot }.archive_catalog()
     }
@@ -118,7 +118,7 @@ impl Store {
                 bytes: 0,
             };
             tx.execute(
-                "INSERT INTO streams(id,path,search,json,title_search,artist_search,album_search) VALUES(?1,?2,?3,?4,?3,'','') ON CONFLICT(path) DO NOTHING",
+                "INSERT INTO streams(id,path,search,json,title_search,artist_search,album_search,kind) VALUES(?1,?2,?3,?4,?3,'','','radio') ON CONFLICT(path) DO NOTHING",
                 params![track.id, entry.url, normalized(&entry.name), serde_json::to_string(&record)?],
             )?;
         }

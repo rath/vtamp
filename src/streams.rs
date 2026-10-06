@@ -47,6 +47,7 @@ impl Entry {
             track_number: 0,
             duration_ms: None,
             cover: None,
+            video: false,
             source: None,
         }
     }

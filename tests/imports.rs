@@ -796,12 +796,21 @@ fn adding_video_to_existing_audio_preserves_identity_overrides_and_queue() {
     assert_eq!(result["job"]["updated"], 1);
     assert_eq!(result["items"][0]["track_id"], id);
     assert_eq!(result["items"][0]["status"], "updated");
-    support::assert_playback_unchanged(before.clone(), h.ok(&["status"]));
+    // The queued copy gains the video flag; entry identity, queue revision,
+    // and every other playback field stay as they were.
+    let mut expected = before.clone();
+    expected["queue"][0]["track"]["video"] = true.into();
+    support::assert_playback_unchanged(expected, h.ok(&["status"]));
     assert_eq!(audio.metadata().unwrap().ino(), inode);
     assert_eq!(fs::read(&audio).unwrap(), bytes);
     let track = h.ok(&["library", "track", id]);
     assert_eq!(track["title"], "My title");
     assert_eq!(track["album"], "My album");
+    assert_eq!(track["video"], true);
+    let videos = h.ok(&["library", "search", "--kind", "video"]);
+    assert_eq!(videos["total"], 1);
+    assert_eq!(videos["tracks"][0]["id"], id);
+    assert_eq!(h.ok(&["library", "search", "--kind", "audio"])["total"], 0);
     let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
     assert_eq!(calls.matches("bestaudio[ext=m4a]/bestaudio").count(), 1);
 }

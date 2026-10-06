@@ -857,14 +857,15 @@ fn worker(
                             offset,
                             limit,
                             anchor,
+                            kind,
                         } => {
                             let reply = if let Some(id) = anchor {
-                                match store.search_around(&query, &id, limit) {
+                                match store.search_around(&query, kind, &id, limit) {
                                     Ok(page) => Reply::success(page),
                                     Err(e) => failure(e),
                                 }
                             } else {
-                                match store.search(&query, offset, limit) {
+                                match store.search(&query, kind, offset, limit) {
                                     Ok((tracks, total)) => Reply::success(
                                         json!({"tracks": tracks, "total": total, "offset": offset}),
                                     ),
@@ -1069,13 +1070,8 @@ fn worker(
             Err(mpsc::RecvTimeoutError::Timeout) => (),
         }
         archive.poll(&mut store, events);
-        if let Err(error) = youtube.poll(
-            &paths,
-            &mut store,
-            &tx,
-            engine.state.scanning || imports > 0,
-            events,
-        ) {
+        let busy = engine.state.scanning || imports > 0;
+        if let Err(error) = youtube.poll(&paths, &mut store, &mut engine, &tx, busy, events) {
             tracing::error!("Import scheduler: {error:#}");
         }
         if let Err(error) = covers.poll(&mut store, &mut engine, events) {
@@ -1254,6 +1250,7 @@ mod agent_tests {
             track_number: 1,
             duration_ms: Some(10000),
             cover: None,
+            video: false,
             source: None,
         };
         store

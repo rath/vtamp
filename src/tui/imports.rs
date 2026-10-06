@@ -120,6 +120,7 @@ impl App {
                     offset: 0,
                     limit: PAGE_SIZE,
                     anchor: Some(reveal.id.clone()),
+                    kind: self.library_kind,
                 })
                 .is_ok()
         {
@@ -164,8 +165,15 @@ impl App {
             self.notice("Could not locate the track in Library.");
             return;
         };
-        let cleared = !self.library_query.is_empty() && effective_query.is_empty();
+        // The server drops the query and the kind independently when either
+        // would hide the track; mirror whatever remains in effect.
+        let effective_kind = value["kind"]
+            .as_str()
+            .and_then(|kind| serde_json::from_value(Value::String(kind.into())).ok());
+        let query_cleared = !self.library_query.is_empty() && effective_query.is_empty();
+        let kind_cleared = self.library_kind.is_some() && effective_kind.is_none();
         self.library_query = effective_query.into();
+        self.library_kind = effective_kind;
         self.offset = value["offset"].as_u64().unwrap_or(0) as usize;
         self.total = value["total"].as_u64().unwrap_or(0) as usize;
         self.tracks = tracks;
@@ -177,10 +185,11 @@ impl App {
         if self.spectrum_replaces_list() {
             self.spectrum.enabled = false;
         }
-        self.notice(if cleared {
-            format!("{} Search cleared to show it.", reveal.notice)
-        } else {
-            reveal.notice
+        self.notice(match (query_cleared, kind_cleared) {
+            (true, true) => format!("{} Filter cleared to show it.", reveal.notice),
+            (true, false) => format!("{} Search cleared to show it.", reveal.notice),
+            (false, true) => format!("{} Kind filter cleared to show it.", reveal.notice),
+            (false, false) => reveal.notice,
         });
     }
 

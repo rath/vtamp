@@ -1090,6 +1090,7 @@ mod tests {
             duration_ms: Some(60_000),
             track_number: 0,
             cover: None,
+            video: false,
             playback: PlaybackSource::File {
                 path: "/tmp/imports/youtube/lO3lG-qXU14/audio.m4a".into(),
             },

@@ -498,6 +498,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(300),
             cover: None,
+            video: false,
             source: None,
         });
         backend.announce(&item);

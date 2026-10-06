@@ -445,6 +445,9 @@ pub enum Library {
         offset: usize,
         #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u16).range(1..=1000))]
         limit: u16,
+        /// Only one catalog kind: audio files, files with saved video, or radio streams.
+        #[arg(long, value_enum)]
+        kind: Option<Kind>,
     },
     #[command(group(clap::ArgGroup::new("fields").multiple(true)))]
     Search {
@@ -459,6 +462,9 @@ pub enum Library {
         exclude: Vec<String>,
         #[arg(long, requires = "fields")]
         exact: bool,
+        /// Only one catalog kind: audio files, files with saved video, or radio streams.
+        #[arg(long, value_enum)]
+        kind: Option<Kind>,
         #[arg(long, default_value_t = 0)]
         offset: usize,
         #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u16).range(1..=1000))]
@@ -1206,11 +1212,16 @@ pub async fn run(args: Args) -> Result<()> {
             },
             Library::Track { id } => Command::LibraryTrack { id },
             Library::Roots => Command::LibraryRoots,
-            Library::List { offset, limit } => Command::LibraryList {
+            Library::List {
+                offset,
+                limit,
+                kind,
+            } => Command::LibraryList {
                 query: String::new(),
                 offset,
                 limit: limit.into(),
                 anchor: None,
+                kind,
             },
             Library::Search {
                 query,
@@ -1219,6 +1230,7 @@ pub async fn run(args: Args) -> Result<()> {
                 album,
                 exclude,
                 exact,
+                kind,
                 offset,
                 limit,
             } => Command::LibrarySearch {
@@ -1229,6 +1241,7 @@ pub async fn run(args: Args) -> Result<()> {
                     album,
                     exclude,
                     exact,
+                    kind,
                 },
                 offset,
                 limit: limit.into(),

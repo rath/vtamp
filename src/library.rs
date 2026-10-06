@@ -123,7 +123,11 @@ pub fn scan(paths: &[PathBuf], old: &[Record], cache: &Path) -> Scan {
                             && record.bytes == metadata.len()
                             && record.track.cover.as_ref().is_none_or(|p| p.exists())
                         {
-                            return Ok(Some((*record).clone()));
+                            // The sidecar can appear or vanish without touching
+                            // the audio file, so re-check it on every scan.
+                            let mut record = (*record).clone();
+                            record.track.video = crate::video::sidecar(&record.track).is_some();
+                            return Ok(Some(record));
                         }
                         let id = previous
                             .get(&path)
@@ -142,6 +146,7 @@ pub fn scan(paths: &[PathBuf], old: &[Record], cache: &Path) -> Scan {
                             track.source = Some(manifest.source);
                             track.apply_source_album();
                         }
+                        track.video = crate::video::sidecar(&track).is_some();
                         Ok(Some(Record {
                             track,
                             modified,
@@ -267,6 +272,7 @@ pub fn read_track(path: &Path, id: String, cache: &Path) -> Result<Track> {
         track_number,
         duration_ms: Some(tagged.properties().duration().as_millis() as u64),
         cover,
+        video: false,
         source: None,
     })
 }
@@ -315,6 +321,7 @@ fn read_mp4(path: &Path, id: String, cache: &Path) -> Result<Track> {
         track_number: tag.track_number().unwrap_or(0).into(),
         duration_ms: Some(tag.duration().as_millis() as u64),
         cover,
+        video: false,
         source: None,
     })
 }

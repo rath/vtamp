@@ -129,7 +129,7 @@ The documents above hold the full contracts; these are the most common regressio
 - Queue entry IDs are not library track IDs, and direct `--no-queue` IDs are
   neither. Never silently deduplicate a queue. Shuffle changes playback order, not
   visible order. Repeat-one applies only to natural endings.
-- The protocol version is 11 and the database version is 7. A schema change needs
+- The protocol version is 12 and the database version is 8. A schema change needs
   a transactional, ID-preserving migration, a version bump, and a `docs/protocol.md`
   update.
 - Casts (headless servers, and device servers started with `--cast`) carry

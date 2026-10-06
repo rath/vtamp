@@ -840,6 +840,7 @@ mod tests {
             track_number: 0,
             duration_ms: Some(60000),
             cover: None,
+            video: false,
             source: None,
         }
     }

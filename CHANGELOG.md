@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- A Library kind filter: `f` cycles all → video → radio in the TUI, shown in
+  the panel title and cleared with the search by `Esc`; `A` queues only the
+  kinds the view shows. The CLI takes `library list --kind` and
+  `library search --kind` with `audio`, `video`, or `radio`.
+- Tracks carry `video: true` when their saved video sidecar exists, and Library
+  and Queue rows show a `· VIDEO` suffix like the existing `· LIVE`. Scans,
+  video publication, and archive restores keep the flag current.
+
+### Changed
+
+- Protocol 12 and database version 8: the catalog stores a `kind` column,
+  backfilled from existing sidecars in the catalog and the saved queue. Restart
+  the server after upgrading; older binaries reject the new database.
+
 ## [0.5.0] — 2026-10-06
 
 Client plugins let local programs extend vtamp with document panels and actions.

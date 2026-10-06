@@ -1,4 +1,4 @@
-# Local protocol, version 11
+# Local protocol, version 12
 
 The CLI is the recommended automation interface. These details are for contributors building another local client.
 
@@ -7,13 +7,13 @@ The CLI is the recommended automation interface. These details are for contribut
 Connect to the per-user Unix socket printed by `vtamp doctor --json`. Send a four-byte unsigned **big-endian** byte count, followed by that many bytes of UTF-8 JSON. The limit is 16 MiB in either direction. A normal connection handles one request and one reply, then closes. Request reads and reply writes have deadlines; an idle or slow client cannot block playback.
 
 ```json
-{"version":11,"request":{"command":"pause"}}
+{"version":12,"request":{"command":"pause"}}
 ```
 
 The `Command`, `Request`, `Reply`, `State`, and `Event` types in `src/model.rs` are the source of truth for field names. Commands are internally tagged with `command` in snake_case. Paths supplied by clients must be absolute; the CLI resolves relative paths before sending them. The server's working directory is not the invoking shell's directory.
 
 ```json
-{"version":11,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
+{"version":12,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
 ```
 
 A version mismatch is rejected before dispatch. There is no TCP listener and no network discovery. Socket permissions restrict clients to the same OS user.
@@ -60,14 +60,14 @@ At most four direct imports and one catalog scan run at a time. There are bounde
 
 ## Watch
 
-Send `{"version":11,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
+Send `{"version":12,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
 
 ```json
-{"version":11,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
+{"version":12,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
 ```
 
 ```json
-{"version":11,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
+{"version":12,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
 ```
 
 `library_changed` and `shutdown` have no data payload. Watch subscriptions are established before the initial snapshot is taken. A client should ignore queued state events with revisions lower than its most recent snapshot and progress events whose revision does not match its current state. On event-buffer lag, the server obtains and emits a new snapshot. Reconnect after a dropped stream and replace local state from the new snapshot; never infer the server's lifetime from one UI connection.
@@ -76,7 +76,7 @@ The CLI's NDJSON watch output normalizes the first snapshot into a `state` event
 
 ## Spectrum subscription
 
-Send `{"version":11,"request":{"command":"spectrum_watch"}}` on a separate
+Send `{"version":12,"request":{"command":"spectrum_watch"}}` on a separate
 connection. The first and subsequent replies contain a `SpectrumFrame` directly
 in `data`, not a `State` or `Event`. Fields are `generation`, nullable `current_id`,
 `active`, `low_hz`, `high_hz`, and `levels` (32 finite values in 0–1). An initial
@@ -133,20 +133,24 @@ Protocol 2 keeps the existing command names and adds:
 | `sleep_status` | none | `scheduled_stop` |
 | `sleep_cancel` | none | Updated state |
 
-The filter has optional `query`, `title`, `artist`, `album`, `exclude`, and `exact`
-fields; defaults are empty query/exclusions, no field constraints, and substring
-matching. Normalize with NFKC and lowercase. Combine all positive filters with
-AND and reject matches containing any exclusion. Exact matching affects only
-explicit field filters. Results retain the existing search/path ordering.
+The filter has optional `query`, `title`, `artist`, `album`, `exclude`, `exact`,
+and `kind` fields; defaults are empty query/exclusions, no field constraints,
+substring matching, and every kind. Normalize with NFKC and lowercase. Combine
+all positive filters with AND and reject matches containing any exclusion. Exact
+matching affects only explicit field filters. `kind` is one of `audio`, `video`,
+or `radio` (see Library kinds below). Results retain the existing search/path
+ordering.
 
-`library_list` accepts an optional `anchor` library track ID in addition to
-`query`, `offset`, and `limit`. With an anchor, the server ignores the supplied
-offset and locates the page containing that track in the ordinary `search,path`
-ordering. It preserves the query if the track matches, otherwise clears it.
-The response includes the effective `query`, `offset`, `tracks`, and `total`.
-A missing anchor returns `track_not_found`. Without an anchor, the existing list
-response is unchanged. This is an additive version-5 extension; older servers
-ignore the field, so clients must verify the response query and target identity.
+`library_list` accepts an optional `anchor` library track ID and an optional
+`kind` in addition to `query`, `offset`, and `limit`. With an anchor, the server
+ignores the supplied offset and locates the page containing that track in the
+ordinary `search,path` ordering. It preserves the query if the track matches,
+otherwise clears it, and independently preserves the kind if the track has it,
+otherwise clears it. The response includes the effective `query`, nullable
+`kind`, `offset`, `tracks`, and `total`. A missing anchor returns
+`track_not_found`. Without an anchor, the existing list response is unchanged.
+The anchor is an additive version-5 extension; older servers ignore the field,
+so clients must verify the response query and target identity.
 
 Queue edit documents and CLI examples are described in README > For scripts and
 agents. The command's nullable guard and request ID fields may be omitted;
@@ -263,11 +267,11 @@ rules: one per track start, seek, and resume, silence while paused or after a
 track ends, an end-of-stream page on stop. Radio playback is not cast. Without
 `--cast` a device server has no cast at all.
 
-Send `{"version":11,"request":{"command":"cast_watch"}}` on a separate connection.
+Send `{"version":12,"request":{"command":"cast_watch"}}` on a separate connection.
 The first reply is a success envelope whose `data` is a `CastInfo`:
 
 ```json
-{"version":11,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
+{"version":12,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
 ```
 
 After that reply the connection carries raw Ogg pages without length prefixes,
@@ -380,9 +384,27 @@ before publishing and using a result. Failed files retry on an explicit library
 scan or server restart; changed fingerprints invalidate both success and failure.
 The cache is not part of Library archives. Analysis does not write source tags.
 
+## Library kinds (version 12)
+
+Every catalog row has exactly one kind: `audio` (a local file without saved
+video), `video` (a local file whose managed silent `video.mkv` sidecar exists),
+or `radio` (a registered stream). `library_list` and the `library_search` filter
+accept an optional `kind` that keeps only that kind; omitted or null keeps every
+kind. The `Track` carries `video: true` when the sidecar exists and omits the
+field otherwise, so existing JSON shapes for audio tracks and streams are
+unchanged. The flag follows the file: scans re-check the sidecar for every
+managed file (so a manually removed sidecar clears it on the next scan),
+successful video publication sets it on the indexed row and on queued copies,
+and archive restores set it when they restore video. The CLI is
+`library list --kind` and `library search --kind`; the TUI's `f` cycles
+all → video → radio in Library.
+
 ## Compatibility and storage
 
-All envelopes advertise protocol 11. Protocol 11 adds file loudness normalization
+All envelopes advertise protocol 12. Protocol 12 adds the catalog `kind` filter
+and the Track `video` flag with database version 8 (a `kind` column on tracks and
+streams, backfilled from managed video sidecars in the catalog and saved queue).
+Protocol 11 added file loudness normalization
 and database version 7 (a separate measurement cache). Protocol 10 added local
 archive restoration and job status commands without changing database version 6. Protocol 9 added
 opt-in video imports and video
@@ -645,6 +667,7 @@ current entry, playback position, or queue revision. Audio files are not rewritt
 
 The Track's optional `source` contains `provider: youtube`, `video_id`, canonical
 `video_url`, original title, channel identity/name/URL, a bounded description,
-and any structured music metadata. Local tracks omit it. The CLI preview performs
+and any structured music metadata. Local tracks omit it. A Track whose managed
+sidecar exists also carries `video: true` (see Library kinds). The CLI preview performs
 extraction locally and an optional read-only lookup; it never starts a server or
 creates a database/job.

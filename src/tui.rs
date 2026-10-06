@@ -58,7 +58,7 @@ const QUEUE_LIMIT: usize = 10_000;
 /// The queue filter is local and applies at once.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 
-const HELP_TEXT: &str = "ATTACH / DETACH\nq / Esc / Ctrl+C   Close this interface. Music keeps playing.\n\nPLAYBACK\nSpace   Play / pause       n/> / b/<   Next / previous\n← / →   Seek 10 seconds    + / -   Volume    s Shuffle   r Cycle repeat\n\nLIBRARY & QUEUE\nTab     Switch panels     j / k   Move selection\ngg / G  First / last      Ctrl-F / Ctrl-B  Page down / up (10)\n/       Search / filter   a       Add folder / stream / playlist\nzz      Jump to now playing   A       Queue all matching\nEsc     Clear filter      Ctrl-U  Clear typed text\nR       Rescan folders    [ / ]   Library pages\nEnter Play selection   Ctrl-Enter Play without queue\ne Enqueue   x/d Remove/delete   J/K Move queue   X Empty queue\n\nv / V   Toggle spectrum / style   t Theme   : Extensions\n\nStop the server explicitly with: vtamp server stop";
+const HELP_TEXT: &str = "ATTACH / DETACH\nq / Esc / Ctrl+C   Close this interface. Music keeps playing.\n\nPLAYBACK\nSpace   Play / pause       n/> / b/<   Next / previous\n← / →   Seek 10 seconds    + / -   Volume    s Shuffle   r Cycle repeat\n\nLIBRARY & QUEUE\nTab     Switch panels     j / k   Move selection\ngg / G  First / last      Ctrl-F / Ctrl-B  Page down / up (10)\n/       Search / filter   a       Add folder / stream / playlist\nf       Library kind: all / video / radio\nzz      Jump to now playing   A       Queue all matching\nEsc     Clear filter      Ctrl-U  Clear typed text\nR       Rescan folders    [ / ]   Library pages\nEnter Play selection   Ctrl-Enter Play without queue\ne Enqueue   x/d Remove/delete   J/K Move queue   X Empty queue\n\nv / V   Toggle spectrum / style   t Theme   : Extensions\n\nStop the server explicitly with: vtamp server stop";
 
 #[derive(Default)]
 struct HelpScroll {
@@ -361,6 +361,8 @@ enum Confirm {
 struct QueueAll {
     /// Library query the walk started with; a change cancels it.
     query: String,
+    /// Library kind the walk started with; a change cancels it too.
+    kind: Option<Kind>,
     /// Offset of the next page to request, in tracks.
     offset: usize,
     /// Library track IDs already in the queue when the walk started. Skipping
@@ -422,6 +424,8 @@ struct App {
     total: usize,
     offset: usize,
     library_query: String,
+    /// Applied Library kind restriction; `f` cycles it, Esc clears it with the query.
+    library_kind: Option<Kind>,
     queue_query: String,
     library_selection: ListState,
     queue_selection: ListState,
@@ -578,6 +582,7 @@ pub async fn run(
         total: 0,
         offset: 0,
         library_query: String::new(),
+        library_kind: None,
         queue_query: String::new(),
         library_selection: ListState::default().with_selected(Some(0)),
         queue_selection: ListState::default().with_selected(Some(0)),
@@ -1400,6 +1405,7 @@ impl App {
         }
         self.queue_all = Some(QueueAll {
             query: self.library_query.clone(),
+            kind: self.library_kind,
             offset: 0,
             queued: self
                 .state
@@ -1423,6 +1429,7 @@ impl App {
             Command::LibrarySearch {
                 filter: SearchFilter {
                     query: all.query.clone(),
+                    kind: all.kind,
                     ..Default::default()
                 },
                 offset: all.offset,
@@ -1436,15 +1443,16 @@ impl App {
     fn queue_all_reply(
         &mut self,
         query: &str,
+        kind: Option<Kind>,
         offset: usize,
         result: Result<Value, String>,
         commands: &mpsc::Sender<Command>,
     ) {
         match &self.queue_all {
-            Some(all) if all.query == query && all.offset == offset => (),
+            Some(all) if all.query == query && all.kind == kind && all.offset == offset => (),
             _ => return,
         }
-        if self.library_query != query {
+        if self.library_query != query || self.library_kind != kind {
             self.queue_all = None;
             return;
         }
@@ -1630,8 +1638,26 @@ impl App {
                 offset: self.offset,
                 limit: PAGE_SIZE,
                 anchor: None,
+                kind: self.library_kind,
             },
         );
+    }
+    /// `f` in Library: all → video → radio → all. The kind is a Library
+    /// filter like the `/` query, so it resets the page and Esc clears both.
+    fn cycle_library_kind(&mut self, commands: &mpsc::Sender<Command>) {
+        self.library_kind = match self.library_kind {
+            None => Some(Kind::Video),
+            Some(Kind::Video) => Some(Kind::Radio),
+            Some(Kind::Radio) | Some(Kind::Audio) => None,
+        };
+        self.offset = 0;
+        self.library_jump = None;
+        self.library_reveal = None;
+        self.library_selection.select(Some(0));
+        self.refresh(commands);
+    }
+    fn library_filtered(&self) -> bool {
+        !self.library_query.is_empty() || self.library_kind.is_some()
     }
     fn state(&mut self, state: State, messages: &mpsc::UnboundedSender<Message>) {
         let cover_key = state.current().and_then(|q| q.track.cover.clone());
@@ -1781,7 +1807,7 @@ impl App {
                 self.library_reveal_reply(&id, &query, result);
             }
             Message::Reply(Command::LibrarySearch { filter, offset, .. }, result) => {
-                self.queue_all_reply(&filter.query, offset, result, commands);
+                self.queue_all_reply(&filter.query, filter.kind, offset, result, commands);
             }
             Message::Reply(command, result)
                 if matches!(
@@ -1795,8 +1821,8 @@ impl App {
             }
             Message::Reply(command, result) => match result {
                 Err(error) => {
-                    if matches!(command, Command::LibraryList { ref query, offset, .. }
-                    if *query == self.library_query && offset == self.offset)
+                    if matches!(command, Command::LibraryList { ref query, offset, kind, .. }
+                    if *query == self.library_query && offset == self.offset && kind == self.library_kind)
                     {
                         self.library_jump = None;
                     }
@@ -1875,8 +1901,17 @@ impl App {
                         }
                         _ => (),
                     }
-                    if let Command::LibraryList { query, offset, .. } = command {
-                        if query == self.library_query && offset == self.offset {
+                    if let Command::LibraryList {
+                        query,
+                        offset,
+                        kind,
+                        ..
+                    } = command
+                    {
+                        if query == self.library_query
+                            && offset == self.offset
+                            && kind == self.library_kind
+                        {
                             let selected_id = self
                                 .library_selection
                                 .selected()
@@ -2138,19 +2173,24 @@ impl App {
             }
             // Esc clears an applied filter before it detaches: the focused
             // list's filter first, then the other list's.
-            KeyCode::Esc if !self.library_query.is_empty() || !self.queue_query.is_empty() => {
+            KeyCode::Esc if self.library_filtered() || !self.queue_query.is_empty() => {
                 self.library_reveal = None;
                 let clear_queue = if self.focus == Focus::Queue {
-                    !self.queue_query.is_empty() || self.library_query.is_empty()
+                    !self.queue_query.is_empty() || !self.library_filtered()
                 } else {
-                    self.library_query.is_empty()
+                    !self.library_filtered()
                 };
                 if clear_queue {
                     self.apply_queue_filter(String::new());
                     self.notice("Queue filter cleared. Esc again or q detaches.");
                 } else {
+                    let kind = self.library_kind.take();
                     self.apply_search(String::new(), commands);
-                    self.notice("Search cleared. Esc again or q detaches.");
+                    self.notice(if kind.is_some() {
+                        "Library filter cleared. Esc again or q detaches."
+                    } else {
+                        "Search cleared. Esc again or q detaches."
+                    });
                 }
             }
             KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
@@ -2277,6 +2317,9 @@ impl App {
                 self.library_jump = None;
                 self.library_selection.select(Some(0));
                 self.refresh(commands);
+            }
+            KeyCode::Char('f') if self.focus == Focus::Library && key.modifiers.is_empty() => {
+                self.cycle_library_kind(commands)
             }
             KeyCode::Char('A') if self.focus == Focus::Library => self.queue_all_matching(commands),
             KeyCode::Enter | KeyCode::Char('e') if self.focus == Focus::Library => {
@@ -2407,6 +2450,7 @@ impl App {
                     offset,
                     limit: PAGE_SIZE,
                     anchor: None,
+                    kind: self.library_kind,
                 })
                 .is_err()
             {
@@ -2983,9 +3027,11 @@ impl App {
     fn library(&mut self, frame: &mut Frame, area: Rect) {
         let p = self.theme.palette();
         let title = format!(
-            " LIBRARY · {}{}{} · Tab / queue ",
+            " LIBRARY · {}{}{}{} · Tab / queue ",
             self.total,
             if area.width >= 50 { " tracks" } else { "" },
+            self.library_kind
+                .map_or_else(String::new, |kind| format!(" · {}", kind.name())),
             if self.library_query.is_empty() {
                 String::new()
             } else {
@@ -3002,11 +3048,7 @@ impl App {
                 .iter()
                 .map(|t| {
                     ListItem::new(vec![
-                        Line::from(if t.is_live() {
-                            format!("{} · LIVE", t.title)
-                        } else {
-                            t.title.clone()
-                        }),
+                        Line::from(title_label(t)),
                         Line::styled(
                             t.album_name().map_or_else(
                                 || {
@@ -3072,11 +3114,7 @@ impl App {
                                 "{} {:02}  {}",
                                 if current { "▶" } else { " " },
                                 i + 1,
-                                if q.track.is_live() {
-                                    format!("{} · LIVE", q.track.title)
-                                } else {
-                                    q.track.title.clone()
-                                }
+                                title_label(&q.track)
                             ),
                             Style::default().fg(if current { p.accent } else { p.text }),
                         ),
@@ -3198,6 +3236,16 @@ fn clamp_selection(state: &mut ListState, len: usize) {
     } else {
         Some(state.selected().unwrap_or(0).min(len - 1))
     });
+}
+
+/// The first row line: the title, with a LIVE or VIDEO suffix that names the
+/// row kind the same way in Library and Queue.
+fn title_label(track: &Track) -> String {
+    match track.kind() {
+        Kind::Radio => format!("{} · LIVE", track.title),
+        Kind::Video => format!("{} · VIDEO", track.title),
+        Kind::Audio => track.title.clone(),
+    }
 }
 
 /// Visible queue rows as `(queue index, entry)` in queue order. An empty filter
@@ -3552,6 +3600,7 @@ mod tests {
                 track_number: i as u32,
                 duration_ms: Some(180_000),
                 cover: None,
+                video: false,
                 source: None,
             })
             .collect();
@@ -3910,6 +3959,81 @@ mod tests {
     }
 
     #[test]
+    fn library_kind_cycles_with_f_and_clears_with_esc() {
+        let mut app = navigation_app(PAGE_SIZE);
+        app.offset = PAGE_SIZE;
+        let (commands, mut requests) = mpsc::channel(8);
+        let (messages, _) = mpsc::unbounded_channel();
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        for expected in [Some(Kind::Video), Some(Kind::Radio), None] {
+            app.key(key('f'), &commands).unwrap();
+            assert_eq!(app.library_kind, expected);
+            assert_eq!(app.offset, 0);
+            assert!(matches!(
+                requests.try_recv().unwrap(),
+                Command::LibraryList { kind, offset: 0, anchor: None, .. } if kind == expected
+            ));
+        }
+        app.key(key('f'), &commands).unwrap();
+        requests.try_recv().unwrap();
+        // A page for a different kind is stale and must not replace the rows.
+        let rows = app.tracks.clone();
+        app.message(
+            Message::Reply(
+                Command::LibraryList {
+                    query: String::new(),
+                    offset: 0,
+                    limit: PAGE_SIZE,
+                    anchor: None,
+                    kind: None,
+                },
+                Ok(serde_json::json!({"tracks": [], "total": 0})),
+            ),
+            &messages,
+            &commands,
+        );
+        assert_eq!(app.tracks, rows);
+        // A walks the same kind the view shows.
+        app.key(key('A'), &commands).unwrap();
+        assert!(matches!(
+            requests.try_recv().unwrap(),
+            Command::LibrarySearch { filter, .. } if filter.kind == Some(Kind::Video)
+        ));
+        app.queue_all = None;
+        // The kind belongs to Library; Queue focus leaves it alone.
+        app.focus = Focus::Queue;
+        app.key(key('f'), &commands).unwrap();
+        assert_eq!(app.library_kind, Some(Kind::Video));
+        assert!(requests.try_recv().is_err());
+        app.focus = Focus::Library;
+        // Esc clears the kind together with the query.
+        app.library_query = "artist".into();
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &commands)
+            .unwrap();
+        assert_eq!(app.library_kind, None);
+        assert!(app.library_query.is_empty());
+        assert!(app.notice.contains("Library filter cleared"));
+        assert!(matches!(
+            requests.try_recv().unwrap(),
+            Command::LibraryList { kind: None, query, .. } if query.is_empty()
+        ));
+    }
+
+    #[test]
+    fn row_titles_name_video_and_live_rows() {
+        let mut track = navigation_app(1).tracks.remove(0);
+        assert_eq!(title_label(&track), "Track 0");
+        track.video = true;
+        assert_eq!(title_label(&track), "Track 0 · VIDEO");
+        let live = crate::streams::Entry {
+            name: "Radio".into(),
+            url: "https://example.com/live".into(),
+        }
+        .track();
+        assert_eq!(title_label(&live), "Radio · LIVE");
+    }
+
+    #[test]
     fn library_edge_jumps_load_the_destination_and_ignore_stale_pages() {
         let mut app = navigation_app(PAGE_SIZE);
         app.total = 450;
@@ -3940,6 +4064,7 @@ mod tests {
                     offset: 0,
                     limit: PAGE_SIZE,
                     anchor: None,
+                    kind: None,
                 },
                 Ok(serde_json::json!({"tracks": rows, "total": 450})),
             ),
@@ -4018,6 +4143,7 @@ mod tests {
                 track_number: i,
                 duration_ms: Some(180_000),
                 cover: None,
+                video: false,
                 source: None,
             })
             .collect();
@@ -4219,6 +4345,7 @@ mod tests {
             track_number: i as u32,
             duration_ms: Some(180_000),
             cover: None,
+            video: false,
             source: None,
         };
         let page = |start: usize, count: usize, total: usize| {
@@ -4398,6 +4525,7 @@ mod tests {
                     offset: PAGE_SIZE,
                     limit: PAGE_SIZE,
                     anchor: None,
+                    kind: None,
                 },
                 Ok(serde_json::json!({"tracks":[],"total":PAGE_SIZE})),
             ),
@@ -4498,6 +4626,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(180_000),
             cover: None,
+            video: false,
             source: None,
         };
         let mut app = navigation_app(2);
@@ -4631,6 +4760,7 @@ mod tests {
                 track_number: i as u32,
                 duration_ms: Some(180_000),
                 cover: None,
+                video: false,
                 source: None,
             })
             .collect();
@@ -5297,7 +5427,7 @@ mod tests {
         assert!(HELP_TEXT.contains("v / V   Toggle spectrum / style"));
         assert_eq!(
             HELP_TEXT.lines().count(),
-            20,
+            21,
             "the help overlay keeps its size"
         );
     }
@@ -5547,6 +5677,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(180_000),
             cover: None,
+            video: false,
             source: None,
         };
         app.tracks = vec![track.clone()];
@@ -5755,6 +5886,7 @@ mod tests {
             total: 0,
             offset: 0,
             library_query: "가 음악 🎵".into(),
+            library_kind: None,
             queue_query: String::new(),
             library_selection: ListState::default(),
             queue_selection: ListState::default(),
@@ -5843,6 +5975,7 @@ mod tests {
             track_number: 1,
             duration_ms: Some(180_000),
             cover: None,
+            video: false,
             source: Some(crate::youtube::Source {
                 video_id: "abc123".into(),
                 channel_url: Some("https://www.youtube.com/channel/UCtest".into()),
@@ -6349,6 +6482,7 @@ mod tests {
             track_number: 0,
             duration_ms: Some(180_000),
             cover: None,
+            video: false,
             source: None,
         };
         app.tracks = vec![track.clone()];
@@ -7293,8 +7427,8 @@ mod tests {
             (40, 12, true),
             (72, 12, true),
             (100, 20, true),
-            (100, 24, true),
-            (100, 25, false),
+            (100, 25, true),
+            (100, 26, false),
             (120, 28, false),
         ] {
             let mut app = app();

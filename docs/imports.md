@@ -216,6 +216,9 @@ commit. Library deduplication does not remove intentional queue duplicates.
 Saved video plays automatically in the cover area through Kitty or Sixel graphics.
 Ghostty + tmux uses Kitty. Press `w` to switch between video and cover; this display
 preference is saved in `ui.json` independently of the per-import download choice.
+Library and Queue rows with saved video end in `· VIDEO`; `f` in Library cycles
+the kind filter (all → video → radio), and `vtamp library search --kind video`
+lists the same tracks for scripts.
 Halfblock and `--art none` sessions retain their existing artwork behavior.
 
 Press uppercase `F` while video is visible to fill the current terminal pane,
