@@ -670,13 +670,20 @@ fn worker(
                             youtube.spawn_task(move |stop| {
                                 let result = (|| -> Result<Reply> {
                                     let config = crate::import_config::Config::load(&paths)?;
+                                    let mut request = request;
+                                    request.validate()?;
                                     let preview = crate::youtube::preview(
                                         &request.url,
                                         request.playlist,
+                                        request.range,
                                         &config,
                                         &stop,
                                     )?;
-                                    Ok(Reply::success(json!({"preview":preview})))
+                                    let mut result = json!({"preview":preview});
+                                    if let Some(range) = request.range {
+                                        result["range"] = json!(range);
+                                    }
+                                    Ok(Reply::success(result))
                                 })();
                                 let _ = answer.send(result.unwrap_or_else(failure));
                             });

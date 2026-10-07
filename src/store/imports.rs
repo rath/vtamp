@@ -207,7 +207,7 @@ impl Store {
         Ok(request)
     }
     pub fn video_record(&self, id: &str) -> Result<Option<Record>> {
-        let result:Option<String>=self.db.query_row("SELECT tracks.json FROM track_metadata JOIN tracks ON track_metadata.id=tracks.id WHERE video_id=?1",[id],|r|r.get(0)).optional()?;
+        let result:Option<String>=self.db.query_row("SELECT tracks.json FROM track_metadata JOIN tracks ON track_metadata.id=tracks.id WHERE source_key=?1",[id],|r|r.get(0)).optional()?;
         if let Some(s) = result {
             return Ok(Some(serde_json::from_str(&s)?));
         }
@@ -215,7 +215,7 @@ impl Store {
         let manifest: Option<String> = self
             .db
             .query_row(
-                "SELECT manifest FROM track_metadata WHERE video_id=?1",
+                "SELECT manifest FROM track_metadata WHERE source_key=?1",
                 [id],
                 |r| r.get(0),
             )
@@ -246,7 +246,7 @@ impl Store {
     }
     pub fn commit_import(&mut self, p: &mut Publication) -> Result<()> {
         let tx = self.db.transaction()?;
-        tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET manifest=excluded.manifest,metadata=excluded.metadata,title_override=coalesce(track_metadata.title_override,excluded.title_override),artist_override=coalesce(track_metadata.artist_override,excluded.artist_override)",params![p.manifest.track_id,p.manifest.source.video_id,serde_json::to_string(&p.manifest)?,serde_json::to_string(&p.manifest.metadata)?,p.manifest.title_override,p.manifest.artist_override])?;
+        tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET manifest=excluded.manifest,metadata=excluded.metadata,title_override=coalesce(track_metadata.title_override,excluded.title_override),artist_override=coalesce(track_metadata.artist_override,excluded.artist_override)",params![p.manifest.track_id,p.manifest.source.video_id,serde_json::to_string(&p.manifest)?,serde_json::to_string(&p.manifest.metadata)?,p.manifest.title_override,p.manifest.artist_override,p.manifest.source.key()])?;
         apply_metadata(&tx, &mut p.record.track)?;
         write_record(&tx, &p.record)?;
         save_job(&tx, &p.job)?;
@@ -337,6 +337,14 @@ fn save_item(tx: &rusqlite::Transaction<'_>, job: &str, item: &ImportItem) -> Re
     Ok(())
 }
 pub(super) fn apply_metadata(tx: &rusqlite::Transaction<'_>, track: &mut Track) -> Result<()> {
+    apply_metadata_inner(tx, track, true)
+}
+
+fn apply_metadata_inner(
+    tx: &rusqlite::Transaction<'_>,
+    track: &mut Track,
+    source_keys: bool,
+) -> Result<()> {
     type Saved = (
         String,
         Option<String>,
@@ -361,7 +369,13 @@ pub(super) fn apply_metadata(tx: &rusqlite::Transaction<'_>, track: &mut Track) 
         && let Some(parent) = track.playback.file().and_then(std::path::Path::parent)
         && let Ok(m) = crate::imports::read_manifest(parent)
     {
-        tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override) VALUES(?1,?2,?3,?4,?5,?6)",params![track.id,m.source.video_id,serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override])?;
+        if source_keys {
+            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![track.id,m.source.video_id,serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override,m.source.key()])?;
+        } else {
+            // The v4 album migration must not change the resource schema before
+            // the atomic v9 migration has run.
+            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override) VALUES(?1,?2,?3,?4,?5,?6)",params![track.id,m.source.video_id,serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override])?;
+        }
         track.apply_source_album();
     }
     Ok(())
@@ -369,6 +383,26 @@ pub(super) fn apply_metadata(tx: &rusqlite::Transaction<'_>, track: &mut Track) 
 pub(super) fn write_record(tx: &rusqlite::Transaction<'_>, record: &Record) -> Result<()> {
     let t = &record.track;
     tx.execute("INSERT INTO tracks(id,path,search,json,title_search,artist_search,album_search,kind) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET path=excluded.path,search=excluded.search,json=excluded.json,title_search=excluded.title_search,artist_search=excluded.artist_search,album_search=excluded.album_search,kind=excluded.kind",params![t.id,t.playback.file().context("Catalog entry is not a file")?.to_string_lossy(),search_blob(t),serde_json::to_string(record)?,normalized(&t.title),normalized(&t.artist),normalized(&t.album),t.kind().name()])?;
+    Ok(())
+}
+
+/// Version 9: retain raw video IDs, but deduplicate complete resources, not videos.
+/// Idempotent for recovery fixtures that rewind user_version on a newer schema.
+pub(super) fn migrate_sources(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    let present: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('track_metadata') WHERE name='source_key')",
+        [],
+        |r| r.get(0),
+    )?;
+    if present {
+        tx.execute("UPDATE track_metadata SET source_key=video_id WHERE source_key IS NULL AND video_id IS NOT NULL", [])?;
+        return Ok(());
+    }
+    tx.execute_batch("CREATE TABLE track_metadata_v9(id TEXT PRIMARY KEY,video_id TEXT,manifest TEXT,metadata TEXT NOT NULL,title_override TEXT,artist_override TEXT,album_override TEXT,source_key TEXT UNIQUE);
+        INSERT INTO track_metadata_v9(id,video_id,manifest,metadata,title_override,artist_override,album_override,source_key)
+        SELECT id,video_id,manifest,metadata,title_override,artist_override,album_override,video_id FROM track_metadata;
+        DROP TABLE track_metadata;
+        ALTER TABLE track_metadata_v9 RENAME TO track_metadata;")?;
     Ok(())
 }
 
@@ -418,7 +452,7 @@ pub(super) fn migrate_albums(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     let mut albums = std::collections::HashMap::new();
     for json in rows {
         let mut record: Record = serde_json::from_str(&json)?;
-        apply_metadata(tx, &mut record.track)?;
+        apply_metadata_inner(tx, &mut record.track, false)?;
         record.track.album = record.track.album_name().unwrap_or_default().to_owned();
         write_record(tx, &record)?;
         albums.insert(record.track.id, record.track.album);
@@ -580,7 +614,7 @@ mod tests {
             artist_override: None,
         };
         store.db.execute(
-            "INSERT INTO track_metadata(id,video_id,manifest,metadata) VALUES('track',?1,?2,?3)",
+            "INSERT INTO track_metadata(id,video_id,manifest,metadata,source_key) VALUES('track',?1,?2,?3,?1)",
             params![id, serde_json::to_string(&manifest).unwrap(), serde_json::to_string(&manifest.metadata).unwrap()],
         ).unwrap();
         let mut job = ImportJob::new(&request);
@@ -650,7 +684,7 @@ mod tests {
                 title_override: None,
                 artist_override: None,
             };
-            tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override) VALUES(?1,?1,?2,?3,'Manual title')",
+            tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,source_key) VALUES(?1,?1,?2,?3,'Manual title',?1)",
                 params![id, serde_json::to_string(&manifest).unwrap(), serde_json::to_string(&metadata).unwrap()]).unwrap();
             state.queue.push(crate::model::QueueItem::new(record.track));
         }

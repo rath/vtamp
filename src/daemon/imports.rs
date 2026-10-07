@@ -81,18 +81,22 @@ impl Runtime {
                     Reply::success(value)
                 }))
             }
-            Command::ImportLookup { video_ids } => Some((|| -> Result<Reply> {
+            Command::ImportLookup { video_ids, range } => Some((|| -> Result<Reply> {
                 if video_ids.len() > 10_000 {
                     anyhow::bail!("Too many video IDs");
                 }
+                let range = crate::youtube::TimeRange::normalized(*range)?;
                 let mut existing = Vec::new();
                 for id in video_ids {
-                    if store.video_record(id)?.is_some_and(|r| {
-                        r.track
-                            .playback
-                            .file()
-                            .is_some_and(std::path::Path::is_file)
-                    }) {
+                    if store
+                        .video_record(&crate::youtube::resource_key(id, range))?
+                        .is_some_and(|r| {
+                            r.track
+                                .playback
+                                .file()
+                                .is_some_and(std::path::Path::is_file)
+                        })
+                    {
                         existing.push(id);
                     }
                 }
@@ -223,7 +227,7 @@ impl Runtime {
                         anyhow::bail!("Import cancelled");
                     }
                     let record = store
-                        .video_record(&p.item.video_id)?
+                        .video_record(&crate::youtube::resource_key(&p.item.video_id, p.job.range))?
                         .context("Imported track disappeared")?;
                     jobs::publish_video(paths, &p, &record)?;
                     // Flag the indexed row and queued copies now; a file that

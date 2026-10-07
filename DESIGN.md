@@ -249,7 +249,15 @@ placeholder labels are recovered from local history on server startup.
 Show the full source title and any different saved title with explicit labels
 below. Lead details with the outcome in plain language, such as "Added 1 track
 to Library." Results omit zero counters and completed transfers omit stale
-percentages. Offer cancel only while running, retry only for unfinished imports,
+percentages. Show normal transfer progress for audio and video downloads. While
+FFmpeg copies a time range, label the stage Preparing audio / Copying video and
+show copied media time, known requested duration/percentage, processing speed,
+and ETA when available. Explain that video streams are copied without re-encoding.
+Boundaries may differ by the source keyframe interval. Never
+present output bytes as network throughput or invent progress when FFmpeg has not
+reported it. Put copying progress first in the details so even the one-row
+40×12 view shows advancement without scrolling. Offer cancel only while running,
+retry only for unfinished imports,
 and track navigation only for multi-track imports. Successful imports need no
 repair action. Paint the full overlay with the theme's panel background.
 Keep the list and key hints visible while PgUp/PgDn scroll the details. On small
@@ -297,9 +305,23 @@ registration must not start playback or change Queue.
 ## Saved YouTube video
 
 The existing import overlay offers Audio only (default) or Audio + video · up to
-480p. Single videos ask before starting; playlist previews use one choice for all
-entries, changed with Tab/Space. Enter confirms; Esc cancels. Downloads never
-remember consent for the next job. Keep controls reachable at 40×12.
+480p. Both audio/video choices are always visible as separate radio rows, with
+Audio only selected by default; never replace them with only the current value.
+Single videos also include **Time range: Off**. Tab or Down moves to the next row;
+Shift-Tab or Up moves back. Focusing an audio/video row selects it, so Down or Tab
+from Audio only selects the 480p option. Left/Right or Space also switches the
+choice; on Time range, it toggles the range. The compact dialog grows when range
+fields are shown and uses the full height at 40×12 to retain both choices. Turning the range on reveals Start and End text
+fields, with a real terminal caret and Ctrl-U clearing. Empty Start/End means
+beginning/end; accept whole seconds, M:SS, or H:MM:SS. Enter validates and confirms;
+Esc cancels. Invalid input remains visible with an inline error. Keep all fields,
+the error, and the two-line key footer reachable at 40×12. Collapsing ignores the
+range draft; a new dialog resets both download choices. Library/Queue titles and
+import rows prefix excerpts with `[01:23–02:45]` (or `–end`), preserving original
+metadata. Selected import details also show the range.
+
+Playlist previews retain one audio/video choice for all entries, changed with
+Tab/Space, without range fields. Enter confirms; Esc cancels.
 
 Saved video automatically occupies the existing cover area with its own aspect
 ratio. `w` toggles video/cover and saves the display preference; `v`/`V` retain

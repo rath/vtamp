@@ -38,7 +38,7 @@ On an Apple Silicon Mac, `brew install rath/tap/vtamp` is all it takes; see [Ins
 - Live radio on macOS: register HTTP(S) URLs or import M3U/PLS channel lists; HLS, MP3, and AAC use native playback.
 - AAC and ALAC in m4a/MP4, MP3, FLAC, WAV, and Ogg Vorbis playback.
 - Embedded album covers, sidecar covers, and a built-in fallback image.
-- Optional YouTube audio imports, with a per-import choice to download video up to 480p.
+- Optional YouTube audio imports, with optional video up to 480p and time ranges for single videos.
 - Terminal video on macOS with installed FFmpeg/FFprobe and Kitty or Sixel graphics: `w` switches video/cover, and `F` fills the current pane with elapsed / total time below. Video defaults to 15 fps; `VTAMP_VIDEO_FPS=8` reduces terminal CPU usage.
 - Managed YouTube download deletion with confirmation; queued copies are removed together, and local originals are protected.
 - Read-only audio spectrum with fourteen rendering styles (bars, gradient, mono, mirror, dots, waterfall, radial, fire, ridge, sparks, squares, smooth, trail, stereo); press `v` to toggle and `V` to change the style.
@@ -565,6 +565,9 @@ Halfblocks need no graphics passthrough. Use `--art halfblocks` if graphics are 
 Artwork comes from the embedded front cover first, then the first embedded picture, then `cover.jpg`, `cover.png`, `cover.jpeg`, `folder.jpg`, `folder.png`, `Folder.jpg`, or `Cover.jpg` beside the audio. Artwork is cached at up to 512 pixels on the long side and keeps its own shape, as imported YouTube thumbnails do; the player sizes the cover area to the image and scales the artwork to fill it, so a wide thumbnail is drawn in full without bars or losing pixels. Missing or undecodable art shows “No album art”. Image decoding, resizing, and Sixel encoding run outside the UI input loop.
 
 YouTube imports can optionally save video up to 480p (`library add URL --video`).
+For one video, enable **Time range** in the TUI download options, or use
+`library add URL --start 1:23 --end 2:45`. Full downloads and excerpts coexist;
+see [time range downloads](docs/imports.md#download-a-time-range).
 The TUI asks before downloading video and automatically plays saved video in the
 cover area on macOS with Kitty/Sixel graphics. Press `w` to switch video/cover
 and save that preference. `F` during video fills the current terminal pane,
@@ -731,7 +734,7 @@ needs free space for those copies as well as the tarball. Existing output files
 are never overwritten. Missing audio, failed tagging, or failed video remuxing
 fails the export and cleans up its temporary files. A missing cover is reported.
 
-Restore merges into the existing Library. YouTube video IDs, original/exported
+Restore merges into the existing Library. YouTube video ID/time-range pairs, original/exported
 audio checksums, and normalized radio URLs detect duplicates; existing files and
 metadata win. Embedded artwork is restored for Library display, and MKV video
 is converted back to vtamp's silent sidecar without re-encoding. Duplicate tracks
@@ -774,11 +777,11 @@ vtamp watch --json
 Every JSON response has a protocol version and `ok`. Successful responses have `data`; failures have an error code and message. Times are integer milliseconds, volume is an integer from 0 to 100, and playback status is `playing`, `paused`, or `stopped`.
 
 ```json
-{"version":12,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
+{"version":13,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
 ```
 
 ```json
-{"version":12,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
+{"version":13,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
 ```
 
 `status` returns `queue`, `current_id`, `status`, `position_ms`, `volume`, `normalization`, `shuffle`, `repeat`, `revision`, `queue_revision`, `play_next`, `scheduled_stop`, `scanning`, and `last_error`. Each queue entry contains `id` and `track`; each track includes its library ID, path, title, artist, album, track number, duration, and optional local cover path. `current_id` identifies a **queue entry**, not a library track. It is null before a current entry is selected. A stopped player may still have a selected entry.
@@ -788,7 +791,7 @@ Every JSON response has a protocol version and `ok`. Successful responses have `
 `watch --json` emits one response envelope per line (NDJSON), starting with a `state` event. Later events are `state`, `progress`, `library_changed`, `scan_completed`, and `shutdown`:
 
 ```json
-{"version":12,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
+{"version":13,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
 ```
 
 State events contain the full state; progress events update position for their matching state revision. Heartbeats occur about once a second, including while paused. A slow subscriber gets a fresh state after event-buffer lag. `Ctrl+C` stops watching without stopping playback.
@@ -942,12 +945,12 @@ and `queue_item_id`, or `kind: "deadline"` and `deadline_ms` (Unix milliseconds)
 
 ### Updating from older protocol versions
 
-This build uses **protocol 12** and migrates the library to **database version 8**
+This build uses **protocol 13** and migrates the library to **database version 9**
 when the new server starts. Stop an older running server using its matching old
 binary before starting the new binary, then reattach TUIs. Restart restores the
 selected track paused and clears stop reservations. Track IDs, queue entries,
 position, volume, and play-next entries are preserved. Binaries that do not
-support database version 8 cannot open the migrated database.
+support database version 9 cannot open the migrated database.
 
 Optional native radio verification uses an isolated, muted server and generated
 silence, including HTTP redirects, token renewal, deliberate network failure,

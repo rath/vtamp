@@ -111,6 +111,76 @@ fn restore(paths: &Paths, store: &mut Store, archive: &Path) -> Report {
 }
 
 #[test]
+fn archive_ranges_roundtrip_without_collapsing_full_or_other_excerpts() {
+    let (_home, paths, mut store, _) = fixture();
+    let original_dir = paths.data.join("imports/youtube/VIDEO000001");
+    let original = crate::imports::read_manifest(&original_dir).unwrap();
+    let mut records = store.records().unwrap();
+    for (start, end) in [("1", "2"), ("3", "")] {
+        let mut manifest = original.clone();
+        manifest.track_id = format!("clip-{start}");
+        manifest.source.range = crate::youtube::TimeRange::from_text(start, end).unwrap();
+        let dir = paths
+            .data
+            .join("imports/youtube")
+            .join(manifest.source.key());
+        fs::create_dir(&dir).unwrap();
+        fs::copy(original_dir.join("audio.m4a"), dir.join("audio.m4a")).unwrap();
+        platform::atomic_json(&dir.join("source.json"), &manifest).unwrap();
+        let mut clip = record(&dir.join("audio.m4a"), &manifest.track_id, &paths);
+        clip.track.source = Some(manifest.source);
+        records.push(clip);
+    }
+    store.replace_catalog(&records).unwrap();
+    let archive = paths.data.join("clips.tar.gz");
+    assert_eq!(export(&paths, &archive).unwrap().included, 4);
+    let (_home, target, mut restored) = empty();
+    assert_eq!(restore(&target, &mut restored, &archive).added, 4);
+    let keys: HashSet<_> = restored
+        .records()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r.track.source.as_ref().map(|s| s.key()))
+        .collect();
+    assert_eq!(
+        keys,
+        HashSet::from([
+            "VIDEO000001".into(),
+            "VIDEO000001--1000-2000".into(),
+            "VIDEO000001--3000-end".into()
+        ])
+    );
+    assert_eq!(restore(&target, &mut restored, &archive).added, 0);
+    for record in restored.records().unwrap() {
+        if record.track.source.is_some() {
+            crate::deletion::managed_path(&target, &record.track).unwrap();
+        }
+    }
+    let scan = library::scan(
+        &restored.roots().unwrap(),
+        &restored.records().unwrap(),
+        &target.cache,
+    );
+    restored.replace_catalog(&scan.records).unwrap();
+    assert_eq!(restored.records().unwrap().len(), 4);
+    let downgraded = paths.data.join("invalid-v1.tar.gz");
+    rewrite(&archive, &downgraded, |m| m.version = 1, false);
+    assert!(preview(&target, &downgraded).is_err());
+}
+
+#[test]
+fn archive_version_one_still_restores_full_downloads() {
+    let (_home, paths, _store, _) = fixture();
+    let archive = paths.data.join("current.tar.gz");
+    export(&paths, &archive).unwrap();
+    let legacy = paths.data.join("legacy.tar.gz");
+    rewrite(&archive, &legacy, |m| m.version = 1, false);
+    let (_home, target, mut restored) = empty();
+    assert_eq!(restore(&target, &mut restored, &legacy).added, 2);
+    assert!(restored.video_record("VIDEO000001").unwrap().is_some());
+}
+
+#[test]
 fn archive_roundtrip_preserves_assets_overrides_rescans_and_session() {
     let (_source, paths, _store, local) = fixture();
     let archive = paths.data.join("library.tar.gz");

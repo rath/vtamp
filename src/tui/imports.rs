@@ -34,10 +34,20 @@ enum ImportTarget {
     /// This import has no track in Library to play.
     Empty,
 }
+#[derive(Default)]
+pub(super) struct DownloadOptions {
+    pub range_enabled: bool,
+    pub start: String,
+    pub end: String,
+    pub field: usize,
+    pub error: Option<String>,
+}
+
 pub(super) enum Modal {
     Jobs,
     Download {
         request: ImportRequest,
+        options: DownloadOptions,
     },
     Preview {
         request: ImportRequest,
@@ -335,21 +345,62 @@ impl App {
             _ => (),
         }
         match modal {
-            Modal::Download { request } => match key.code {
-                KeyCode::Tab
-                | KeyCode::Left
-                | KeyCode::Right
-                | KeyCode::Up
-                | KeyCode::Down
-                | KeyCode::Char(' ') => request.video = !request.video,
-                KeyCode::Enter => {
-                    let request = request.clone();
-                    self.import_ui.modal = None;
-                    self.send(commands, Command::ImportStart { request });
+            Modal::Download { request, options } => {
+                let count = if options.range_enabled { 5 } else { 3 };
+                match key.code {
+                    KeyCode::Tab | KeyCode::Down => {
+                        options.field = (options.field + 1) % count;
+                        if options.field < 2 {
+                            request.video = options.field == 1;
+                        }
+                    }
+                    KeyCode::BackTab | KeyCode::Up => {
+                        options.field = (options.field + count - 1) % count;
+                        if options.field < 2 {
+                            request.video = options.field == 1;
+                        }
+                    }
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if options.field < 3 => {
+                        if options.field < 2 {
+                            request.video = !request.video;
+                            options.field = usize::from(request.video);
+                        } else {
+                            options.range_enabled = !options.range_enabled;
+                        }
+                        options.error = None;
+                    }
+                    KeyCode::Enter => {
+                        let range = if options.range_enabled {
+                            crate::youtube::TimeRange::from_text(&options.start, &options.end)
+                        } else {
+                            Ok(None)
+                        };
+                        match range {
+                            Ok(range) => {
+                                let mut request = request.clone();
+                                request.range = range;
+                                self.import_ui.modal = None;
+                                self.send(commands, Command::ImportStart { request });
+                            }
+                            Err(error) => options.error = Some(format!("{error:#}")),
+                        }
+                    }
+                    KeyCode::Char('q') if options.field < 3 => self.import_ui.modal = None,
+                    _ if options.field >= 3 => {
+                        let text = if options.field == 3 {
+                            &mut options.start
+                        } else {
+                            &mut options.end
+                        };
+                        if (text.len() < 128 || !matches!(key.code, KeyCode::Char(_)))
+                            && super::edit_line(text, key)
+                        {
+                            options.error = None;
+                        }
+                    }
+                    _ => (),
                 }
-                KeyCode::Char('q') => self.import_ui.modal = None,
-                _ => (),
-            },
+            }
             Modal::Preview { request, result } => {
                 if key.code == KeyCode::Enter
                     && let Some(preview) = result
@@ -698,7 +749,11 @@ impl App {
             let active = start + row == selected;
             let status = import_stage(&job.stage);
             let title_width = (list.width as usize).saturating_sub(status.width() + 4);
-            let title = import_title(&job.title, title_width);
+            let label = job.range.map_or_else(
+                || job.title.clone(),
+                |r| format!("[{}] {}", r.label(), job.title),
+            );
+            let title = import_title(&label, title_width);
             let padding = " ".repeat(title_width.saturating_sub(title.width()));
             let line = Line::from(vec![
                 Span::raw(if active { "› " } else { "  " }),
@@ -731,6 +786,20 @@ impl App {
         );
         let job = &self.import_ui.jobs[selected];
         let mut lines = Vec::new();
+        let processing = (!job.terminal()
+            && matches!(job.stage.as_str(), "processing_audio" | "processing_video"))
+        .then(|| job.progress.processing_summary())
+        .flatten();
+        if let Some(text) = &processing {
+            // The smallest pane has one detail row: keep real progress first.
+            lines.push(Line::styled(
+                text.clone(),
+                Style::default().fg(p.text).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if let Some(range) = job.range {
+            lines.push(Line::from(format!("Time range: {}", range.label())));
+        }
         let elapsed = job
             .finished_at_ms
             .unwrap_or_else(unix_ms)
@@ -748,7 +817,14 @@ impl App {
                 job.added + job.skipped + job.failed
             )));
         }
-        if !job.terminal() && job.stage == "downloading" {
+        if processing.is_some() {
+            lines.push(Line::styled(
+                "Copying source streams without re-encoding.",
+                Style::default().fg(p.muted),
+            ));
+        } else if !job.terminal()
+            && matches!(job.stage.as_str(), "downloading" | "downloading_video")
+        {
             let mut transfer = Vec::new();
             if let (Some(bytes), Some(total)) = (job.progress.bytes, job.progress.total)
                 && total > 0
@@ -855,8 +931,17 @@ impl App {
             return;
         };
         let p = self.theme.palette();
-        let width = area.width.saturating_sub(4).min(90);
-        let height = area.height.saturating_sub(2).min(24);
+        let (width, height) = if let Modal::Download { options, .. } = modal {
+            (
+                area.width.saturating_sub(4).min(60),
+                area.height.min(if options.range_enabled { 12 } else { 8 }),
+            )
+        } else {
+            (
+                area.width.saturating_sub(4).min(90),
+                area.height.saturating_sub(2).min(24),
+            )
+        };
         let rect = Rect::new(
             area.x + (area.width - width) / 2,
             area.y + (area.height - height) / 2,
@@ -883,27 +968,103 @@ impl App {
             self.draw_import_jobs(frame, inner);
             return;
         }
+        if let Modal::Download { request, options } = modal {
+            let body_height = inner.height.saturating_sub(2);
+            let choices = [
+                format!("({}) Audio only", if request.video { " " } else { "*" }),
+                format!(
+                    "({}) Audio + video · up to 480p",
+                    if request.video { "*" } else { " " }
+                ),
+                format!(
+                    "Time range: {}",
+                    if options.range_enabled { "On" } else { "Off" }
+                ),
+            ];
+            for (row, text) in choices.into_iter().enumerate() {
+                let focused = options.field == row;
+                let line = format!("{} {text}", if focused { "›" } else { " " });
+                frame.render_widget(
+                    Paragraph::new(line).style(Style::default().fg(if focused {
+                        p.accent
+                    } else {
+                        p.text
+                    })),
+                    Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+                );
+            }
+            if options.range_enabled {
+                for (row, label, value, placeholder) in [
+                    (3, "Start", &options.start, "beginning"),
+                    (4, "End", &options.end, "end"),
+                ] {
+                    let focused = options.field == row;
+                    let prefix = format!("{} {label}: ", if focused { "›" } else { " " });
+                    let prefix_width = prefix.width() as u16;
+                    let (visible, column) =
+                        super::caret_tail(value, inner.width.saturating_sub(prefix_width));
+                    let line = Line::from(vec![
+                        Span::styled(
+                            prefix,
+                            Style::default().fg(if focused { p.accent } else { p.text }),
+                        ),
+                        Span::styled(
+                            if value.is_empty() {
+                                placeholder
+                            } else {
+                                visible
+                            },
+                            Style::default().fg(if value.is_empty() { p.muted } else { p.text }),
+                        ),
+                    ]);
+                    frame.render_widget(
+                        Paragraph::new(line),
+                        Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+                    );
+                    if focused {
+                        self.caret = Some(Position::new(
+                            inner.x + prefix_width + column,
+                            inner.y + row as u16,
+                        ));
+                    }
+                }
+                let help = options
+                    .error
+                    .as_deref()
+                    .unwrap_or("Seconds / M:SS / H:MM:SS");
+                frame.render_widget(
+                    Paragraph::new(help)
+                        .wrap(Wrap { trim: false })
+                        .style(Style::default().fg(if options.error.is_some() {
+                            p.warning
+                        } else {
+                            p.muted
+                        })),
+                    Rect::new(
+                        inner.x,
+                        inner.y + 5,
+                        inner.width,
+                        body_height.saturating_sub(5),
+                    ),
+                );
+            }
+            frame.render_widget(
+                Paragraph::new("Tab/↑/↓ move · ←/→ choose\nEnter add · Esc cancel")
+                    .style(Style::default().fg(p.muted)),
+                Rect::new(
+                    inner.x,
+                    inner.y + body_height,
+                    inner.width,
+                    inner.height.min(2),
+                ),
+            );
+            return;
+        }
         let mut lines = Vec::new();
         let mut focused_rows = None;
         let mut caret_column = 0;
         let hint = match modal {
-            Modal::Download { request } => {
-                lines.push(Line::from("Download video too?"));
-                lines.push(Line::from(""));
-                lines.push(Line::styled(
-                    format!("{} Audio only", if request.video { " " } else { "›" }),
-                    Style::default().fg(if request.video { p.text } else { p.accent }),
-                ));
-                lines.push(Line::styled(
-                    format!(
-                        "{} Audio + video · up to 480p",
-                        if request.video { "›" } else { " " }
-                    ),
-                    Style::default().fg(if request.video { p.accent } else { p.text }),
-                ));
-                "Tab/↑/↓ choose · Enter add
-Esc cancel"
-            }
+            Modal::Download { .. } => unreachable!(),
             Modal::Preview { request, result } => {
                 if let Some(v) = result {
                     lines.push(
@@ -1029,6 +1190,9 @@ fn import_stage(stage: &str) -> &str {
         "metadata" => "Reading metadata",
         "downloading" => "Downloading",
         "downloading_video" => "Downloading video",
+        "resolving_video" => "Looking up video",
+        "processing_audio" => "Preparing audio",
+        "processing_video" => "Copying video",
         "processing" => "Processing",
         "indexing" => "Saving",
         "cancelling" => "Cancelling",
@@ -1055,7 +1219,13 @@ fn import_outcomes(job: &ImportJob) -> Vec<String> {
             "resolving" => "Looking up the YouTube source…".into(),
             "metadata" => "Preparing track details…".into(),
             "downloading" => "Downloading audio…".into(),
+            "downloading_video" if job.range.is_some() => {
+                "Preparing video clip (up to 480p)…".into()
+            }
             "downloading_video" => "Downloading video (up to 480p)…".into(),
+            "resolving_video" => "Checking the source video length…".into(),
+            "processing_audio" => "Preparing audio clip…".into(),
+            "processing_video" => "Copying video clip (up to 480p)…".into(),
             "processing" => "Preparing audio and artwork…".into(),
             "indexing" => "Adding to Library…".into(),
             "cancelling" => "Cancelling this import…".into(),

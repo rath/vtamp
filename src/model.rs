@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// What a catalog row is: a local audio file, a file with a managed silent
 /// video sidecar, or a registered radio stream. Every row has exactly one kind.
@@ -261,6 +261,8 @@ pub enum Command {
     },
     ImportLookup {
         video_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        range: Option<crate::youtube::TimeRange>,
     },
     LibraryEdit {
         id: String,

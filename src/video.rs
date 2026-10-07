@@ -81,11 +81,11 @@ pub fn managed_dir(track: &Track) -> Option<PathBuf> {
         return None;
     }
     let dir = audio.parent()?;
-    if dir.file_name()?.to_str()? != source.video_id {
+    if dir.file_name()?.to_str()? != source.key() {
         return None;
     }
     let manifest = imports::read_manifest(dir).ok()?;
-    if manifest.track_id != track.id || manifest.source.video_id != source.video_id {
+    if manifest.track_id != track.id || manifest.source.key() != source.key() {
         return None;
     }
     Some(dir.to_owned())

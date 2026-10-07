@@ -1,4 +1,4 @@
-# Local protocol, version 12
+# Local protocol, version 13
 
 The CLI is the recommended automation interface. These details are for contributors building another local client.
 
@@ -7,13 +7,13 @@ The CLI is the recommended automation interface. These details are for contribut
 Connect to the per-user Unix socket printed by `vtamp doctor --json`. Send a four-byte unsigned **big-endian** byte count, followed by that many bytes of UTF-8 JSON. The limit is 16 MiB in either direction. A normal connection handles one request and one reply, then closes. Request reads and reply writes have deadlines; an idle or slow client cannot block playback.
 
 ```json
-{"version":12,"request":{"command":"pause"}}
+{"version":13,"request":{"command":"pause"}}
 ```
 
 The `Command`, `Request`, `Reply`, `State`, and `Event` types in `src/model.rs` are the source of truth for field names. Commands are internally tagged with `command` in snake_case. Paths supplied by clients must be absolute; the CLI resolves relative paths before sending them. The server's working directory is not the invoking shell's directory.
 
 ```json
-{"version":12,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
+{"version":13,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
 ```
 
 A version mismatch is rejected before dispatch. There is no TCP listener and no network discovery. Socket permissions restrict clients to the same OS user.
@@ -60,14 +60,14 @@ At most four direct imports and one catalog scan run at a time. There are bounde
 
 ## Watch
 
-Send `{"version":12,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
+Send `{"version":13,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
 
 ```json
-{"version":12,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
+{"version":13,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
 ```
 
 ```json
-{"version":12,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
+{"version":13,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
 ```
 
 `library_changed` and `shutdown` have no data payload. Watch subscriptions are established before the initial snapshot is taken. A client should ignore queued state events with revisions lower than its most recent snapshot and progress events whose revision does not match its current state. On event-buffer lag, the server obtains and emits a new snapshot. Reconnect after a dropped stream and replace local state from the new snapshot; never infer the server's lifetime from one UI connection.
@@ -76,7 +76,7 @@ The CLI's NDJSON watch output normalizes the first snapshot into a `state` event
 
 ## Spectrum subscription
 
-Send `{"version":12,"request":{"command":"spectrum_watch"}}` on a separate
+Send `{"version":13,"request":{"command":"spectrum_watch"}}` on a separate
 connection. The first and subsequent replies contain a `SpectrumFrame` directly
 in `data`, not a `State` or `Event`. Fields are `generation`, nullable `current_id`,
 `active`, `low_hz`, `high_hz`, and `levels` (32 finite values in 0–1). An initial
@@ -267,11 +267,11 @@ rules: one per track start, seek, and resume, silence while paused or after a
 track ends, an end-of-stream page on stop. Radio playback is not cast. Without
 `--cast` a device server has no cast at all.
 
-Send `{"version":12,"request":{"command":"cast_watch"}}` on a separate connection.
+Send `{"version":13,"request":{"command":"cast_watch"}}` on a separate connection.
 The first reply is a success envelope whose `data` is a `CastInfo`:
 
 ```json
-{"version":12,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
+{"version":13,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
 ```
 
 After that reply the connection carries raw Ogg pages without length prefixes,
@@ -401,8 +401,12 @@ all → video → radio in Library.
 
 ## Compatibility and storage
 
-All envelopes advertise protocol 12. Protocol 12 adds the catalog `kind` filter
-and the Track `video` flag with database version 8 (a `kind` column on tracks and
+All envelopes advertise protocol 13. Protocol 13 adds optional YouTube import
+ranges and range-aware lookup. Database version 9 replaces the unique video ID
+constraint with a unique resource key (video ID plus normalized range), preserving
+track IDs, metadata, queue, and sessions in a transactional migration. Existing
+full-download paths and keys remain video IDs. Protocol 12 added the catalog
+`kind` filter and the Track `video` flag with database version 8 (a `kind` column on tracks and
 streams, backfilled from managed video sidecars in the catalog and saved queue).
 Protocol 11 added file loudness normalization
 and database version 7 (a separate measurement cache). Protocol 10 added local
@@ -467,7 +471,7 @@ CLI progress goes to stderr even with `--json`, preserving the single final
 stdout response. Terminal output refreshes one bounded line; redirected output
 records stage changes/completions and at most one intermediate update every five
 seconds.
-Archive format 1 is unchanged; normalization measurements are not exported.
+Normalization measurements are not exported.
 
 One restore runs at a time. Concurrent catalog scans, direct-file imports,
 YouTube work (including metadata tasks), or cover refresh prevent admission with
@@ -479,7 +483,10 @@ never starts a server; the newest 100 reports are held in memory, and unavailabl
 reports return `archive_job_not_found`. Relays reject these wire commands with
 `archive_local_only`; the CLI also rejects export and dry-run through a relay.
 
-The independent archive format is version 1: a gzip-compressed tar begins with
+The independent archive writer uses version 2; the reader accepts versions 1 and 2.
+Version 2 preserves optional source ranges and deduplicates video ID/range pairs;
+version 1 must not contain ranges. Older readers reject version 2 rather than
+misidentifying an excerpt as the complete video. A gzip-compressed tar begins with
 `manifest.json`, followed by allowlisted regular files at its root. Audio is
 `ARTIST - TITLE.ext` and video is `ARTIST - TITLE.mkv`. Unknown/empty artists are
 omitted. Names use NFC Unicode, sanitize unsafe characters, bound the stem to
@@ -526,7 +533,9 @@ identity, original or exported audio hashes, and normalized radio URLs deduplica
 entries while preserving destination metadata. Original hashes prevent tagging
 from creating duplicates when restoring into the source Library. File copies live
 under `imports/archive/UUID`; YouTube resources retain
-`imports/youtube/VIDEO_ID`. Restored local copies keep local-file deletion protection.
+`imports/youtube/VIDEO_ID` for full sources or
+`imports/youtube/VIDEO_ID--START_MS-END_MS` for excerpts (`end` for an omitted end).
+Restored local copies keep local-file deletion protection.
 
 Workers handle hashing, decompression, file validation and publication outside
 the playback owner loop. New directories are staged under
@@ -577,7 +586,7 @@ automatically. See [configuration and workflows](imports.md).
 | `import_available` | none | `available` boolean; no subprocesses |
 | `import_capabilities` | none | Import tool paths/versions, YouTube configuration, `authentication_tested: false` |
 | `import_preview` | `request` | `preview` with normalized URL, title, playlist flag, entries |
-| `import_lookup` | `video_ids` (up to 10,000) | IDs already present with existing files |
+| `import_lookup` | `video_ids` (up to 10,000), optional `range` | IDs whose exact resource has an existing file; omitted range means full source |
 | `import_start` | `request` | `job_id`, `status: queued` |
 | `imports` | none | Recent jobs, newest first |
 | `import_status` | `id`, `offset`, `limit` (1–1000) | `job`, paginated `items`, `offset` |
@@ -604,7 +613,19 @@ and an unknown or restarted job returns `cover_job_not_found`. A second refresh
 while one runs returns `cover_refresh_in_progress` with its `job_id`.
 
 An import request has `url`, `playlist` and `video` (both default false), optional single-video
-`title`/`artist`, and optional `video_ids` to freeze a preview or retry subset.
+`title`/`artist`, optional `range`, and optional `video_ids` to freeze a preview or retry subset.
+`range` is `{ "start_ms": 83000, "end_ms": 165000 }`; milliseconds are unsigned
+integers, start is required, and omitted/null end means EOF. End must exceed start;
+both timestamps must fit FFmpeg's signed microsecond clock. Missing/null range or
+start zero with no end means the full source. A supplied range is rejected for
+playlists. CLI `--start`/`--end` and TUI inputs accept whole seconds, M:SS, or H:MM:SS.
+Range previews also return the normalized `range` beside `preview` and validate
+source duration without creating a job. Unknown duration, start at/past the end,
+and end beyond the source fail before an excerpt is downloaded.
+Jobs and Track `source` optionally carry the same normalized `range`, omitted for
+full sources and defaulting to absent when reading old data. Retries retain it;
+video-only upgrades target that exact resource. Requests with an open end remain
+distinct from an explicit end, even when the current source durations match.
 Optional `source_title` preserves the source video/playlist label across a frozen
 preview or retry; it never overrides track metadata. Omitted/null uses the source
 URL until a title is resolved. When supplied, it must be nonempty text of at most
@@ -618,7 +639,14 @@ Retries capture the current configuration rather than the original job's setting
 
 Jobs carry `job_id`, normalized source URL, title, status/stage, nullable total
 and current item, added/skipped/failed counts, bytes/total/speed/ETA, timestamps,
-error, and a monotonically increasing revision. Terminal statuses are completed,
+error, and a monotonically increasing revision. Range processing adds optional
+`progress.processed_ms`, `processing_total_ms`, and `processing_speed` (media seconds
+per wall-clock second). Old reports omit them. FFmpeg progress blocks drive these
+fields; `eta` is estimated from remaining media time and positive processing speed,
+while network `speed` is null during section processing. `processing_audio` and
+`processing_video` distinguish section processing from ordinary transfers; `resolving_video` identifies
+source-length lookup before a video upgrade. No timer-generated percentages are
+emitted. Terminal statuses are completed,
 partial, failed, cancelled, and interrupted. Items carry an index, video ID,
 title, status, optional track ID, metadata result/warning, and error. Video-enabled
 requests additionally report `video_status` (`queued`, `downloading`, `ready`, or
@@ -656,9 +684,17 @@ folder. Publication waits for catalog scans/direct path imports to finish, then
 renames the completed directory and commits the track, source/overrides, and
 successful item report together. A failed DB commit leaves a recoverable directory;
 retry or a later scan can adopt it. Scans never enumerate staging directories.
-Deduplication is by source video ID and existing file, independently of queue
-entry identity. With `video: true`, an existing audio file without a valid silent
-`video.mkv` is upgraded without replacing audio or changing track/queue identity.
+Deduplication is by source video ID, normalized range, and existing file, independently
+of queue entry identity. Full downloads retain their old key/path; excerpts use
+`VIDEO_ID--START_MS-END_MS` with `end` for EOF. The key is shared by publication,
+scan adoption, upgrades, deletion/recovery, and archive restoration. With
+`video: true`, an existing audio file without a valid silent `video.mkv` is upgraded without replacing audio or changing track/queue identity.
+Section downloads apply the same requested yt-dlp range to audio and video using
+the configured FFmpeg location and explicit `--no-force-keyframes-at-cuts`.
+FFmpeg copies compressed video packets without changing codec; boundaries may
+shift to source packet/keyframe boundaries. Requested ranges still determine
+resource identity, rather than the approximate saved duration. Existing files
+are not transcoded or replaced to change the cutting policy.
 Video download, remux, and probe run on the import worker after audio publication;
 the owner atomically renames the verified sidecar and saves the item report. A
 failed report commit leaves a recoverable sidecar, recognized on retry. Scans do

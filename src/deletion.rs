@@ -63,14 +63,15 @@ pub(crate) fn managed_path(paths: &Paths, track: &Track) -> Result<PathBuf> {
         crate::youtube::valid_id(&source.video_id),
         "Invalid video ID"
     );
-    let destination = root(paths)?.join(&source.video_id);
+    source.validate()?;
+    let destination = root(paths)?.join(source.key());
     ensure!(
         track.playback.file() == Some(destination.join("audio.m4a").as_path()),
         "Track is not in its managed download directory"
     );
     let manifest = validate_files(&destination)?;
     ensure!(
-        manifest.track_id == track.id && manifest.source.video_id == source.video_id,
+        manifest.track_id == track.id && manifest.source.key() == source.key(),
         "Managed import identity mismatch"
     );
     Ok(destination)
@@ -201,7 +202,7 @@ pub fn recover(paths: &Paths, store: &Store) -> Result<()> {
             continue;
         }
         let manifest = validate_files(&staged)?;
-        let destination = root(paths)?.join(&manifest.source.video_id);
+        let destination = root(paths)?.join(manifest.source.key());
         if let Some(track) = store.track(&manifest.track_id)? {
             ensure!(
                 track.playback.file() == Some(destination.join("audio.m4a").as_path()),
@@ -342,7 +343,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
                 .unwrap(),
-            8
+            9
         );
     }
 

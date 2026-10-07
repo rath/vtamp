@@ -21,6 +21,8 @@ pub(crate) struct Publication {
 struct Directory {
     id: String,
     video_id: Option<String>,
+    #[serde(default)]
+    range: Option<youtube::TimeRange>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -40,7 +42,11 @@ impl Directory {
                 youtube::valid_id(video_id),
                 "Invalid restore video identity"
             );
-            paths.data.join("imports/youtube").join(video_id)
+            let range = youtube::TimeRange::normalized(self.range)?;
+            paths
+                .data
+                .join("imports/youtube")
+                .join(youtube::resource_key(video_id, range))
         } else {
             paths.data.join("imports/archive").join(&self.id)
         })
@@ -74,7 +80,7 @@ pub(super) fn plan(
             .context("Expected a file record")?;
         // Existing identities are preserved, including temporarily unavailable files.
         if let Some(source) = &record.track.source {
-            videos.insert(source.video_id.clone());
+            videos.insert(source.key());
         }
         if let Ok((_, hash)) = hash_file(file, stop, progress) {
             hashes.insert(hash);
@@ -88,7 +94,7 @@ pub(super) fn plan(
         check_stop(stop)?;
         let title = &entry.track.title;
         if let Some(source) = &entry.track.source
-            && !videos.insert(source.video_id.clone())
+            && !videos.insert(source.key())
         {
             report.duplicates += 1;
             report.note(format!("Skipped existing YouTube track: {title}"));
@@ -152,6 +158,7 @@ pub(crate) fn prepare(
         let dir = Directory {
             id: id.clone(),
             video_id: entry.track.source.as_ref().map(|s| s.video_id.clone()),
+            range: entry.track.source.as_ref().and_then(|s| s.range),
         };
         let destination = dir.destination(paths)?;
         let staged = temp.path().join(&id);
@@ -333,8 +340,13 @@ fn rollback(paths: &Paths, journal: &Journal) -> Result<()> {
             "Restore cleanup refuses a symlink"
         );
         let owned = if dir.video_id.is_some() {
-            crate::imports::read_manifest(&destination)
-                .is_ok_and(|m| m.track_id == dir.id && Some(m.source.video_id) == dir.video_id)
+            crate::imports::read_manifest(&destination).is_ok_and(|m| {
+                m.track_id == dir.id
+                    && dir
+                        .video_id
+                        .as_ref()
+                        .is_some_and(|id| m.source.key() == youtube::resource_key(id, dir.range))
+            })
         } else {
             fs::read(destination.join(".archive-owner.json"))
                 .ok()

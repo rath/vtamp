@@ -28,7 +28,7 @@ impl Store {
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 8 {
+        if version > 9 {
             bail!("Database was created by a newer vtamp; please upgrade");
         }
         if version == 0 {
@@ -109,6 +109,12 @@ impl Store {
             )?;
             imports::migrate_kinds(&tx)?;
             tx.pragma_update(None, "user_version", 8)?;
+            tx.commit()?;
+        }
+        if version < 9 {
+            let tx = db.transaction()?;
+            imports::migrate_sources(&tx)?;
+            tx.pragma_update(None, "user_version", 9)?;
             tx.commit()?;
         }
         Ok(Self { db })
@@ -650,7 +656,7 @@ mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
                 .unwrap(),
-            8
+            9
         );
     }
 
@@ -935,6 +941,86 @@ mod tests {
     }
 
     #[test]
+    fn version_nine_migration_preserves_ids_and_rolls_back_failures() {
+        for fail in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().join("state.db");
+            let mut store = Store::open(&path).unwrap();
+            let original = managed_record(home.path(), "VIDEO000001", "stable", false);
+            store.replace_catalog(&[original]).unwrap();
+            store
+                .edit_metadata(
+                    "stable",
+                    Some("My title".into()),
+                    None,
+                    Some("".into()),
+                    None,
+                )
+                .unwrap();
+            let before = store.track("stable").unwrap().unwrap();
+            let state = State {
+                queue: vec![crate::model::QueueItem::new(before.clone())],
+                volume: 0,
+                ..Default::default()
+            };
+            store.save(&state).unwrap();
+            store.db.execute_batch("BEGIN;
+                ALTER TABLE track_metadata RENAME TO newer_metadata;
+                CREATE TABLE track_metadata(id TEXT PRIMARY KEY,video_id TEXT UNIQUE,manifest TEXT,metadata TEXT NOT NULL,title_override TEXT,artist_override TEXT,album_override TEXT);
+                INSERT INTO track_metadata SELECT id,video_id,manifest,metadata,title_override,artist_override,album_override FROM newer_metadata;
+                DROP TABLE newer_metadata;
+                PRAGMA user_version=8;
+                COMMIT;").unwrap();
+            if fail {
+                store
+                    .db
+                    .execute_batch("CREATE TABLE track_metadata_v9(blocker TEXT)")
+                    .unwrap();
+            }
+            drop(store);
+            if fail {
+                assert!(Store::open(&path).is_err());
+                let db = Connection::open(&path).unwrap();
+                assert_eq!(
+                    db.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
+                        .unwrap(),
+                    8
+                );
+                assert_eq!(
+                    db.query_row("SELECT id FROM track_metadata", [], |r| r
+                        .get::<_, String>(0))
+                        .unwrap(),
+                    "stable"
+                );
+                db.execute_batch("DROP TABLE track_metadata_v9").unwrap();
+            }
+            let store = Store::open(&path).unwrap();
+            assert_eq!(store.track("stable").unwrap().unwrap(), before);
+            assert_eq!(
+                serde_json::to_value(store.restore().unwrap()).unwrap(),
+                serde_json::to_value(&state).unwrap()
+            );
+            assert_eq!(
+                store.video_record("VIDEO000001").unwrap().unwrap().track.id,
+                "stable"
+            );
+            assert!(
+                store
+                    .video_record("VIDEO000001--1000-2000")
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(
+                store
+                    .db
+                    .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
+                    .unwrap(),
+                9
+            );
+        }
+    }
+
+    #[test]
     fn version_eight_marks_video_sidecars_and_filters_kinds() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("old.db");
@@ -1046,7 +1132,7 @@ mod tests {
                 .db
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            8
+            9
         );
         let filter = SearchFilter {
             exclude: vec!["LIVE".into()],

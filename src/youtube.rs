@@ -1,3 +1,7 @@
+mod progress;
+mod range;
+pub use range::{TimeRange, parse_time, resource_key};
+
 use crate::{
     import_config::Config,
     subprocess::{self, Cancel},
@@ -15,6 +19,12 @@ use std::{
 #[serde(default, tag = "provider", rename = "youtube")]
 pub struct Source {
     pub video_id: String,
+    #[serde(
+        default,
+        deserialize_with = "range::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub range: Option<TimeRange>,
     pub video_url: String,
     pub original_title: String,
     pub channel_id: Option<String>,
@@ -24,6 +34,16 @@ pub struct Source {
     pub music_title: Option<String>,
     pub music_artist: Option<String>,
     pub music_album: Option<String>,
+}
+impl Source {
+    pub fn key(&self) -> String {
+        resource_key(&self.video_id, self.range)
+    }
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(valid_id(&self.video_id), "Invalid YouTube video ID");
+        TimeRange::normalized(self.range)?;
+        Ok(())
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preview {
@@ -146,6 +166,7 @@ pub fn source(v: &Value) -> Result<Source> {
     Ok(Source {
         video_url: video_url(&id),
         video_id: id,
+        range: None,
         original_title: field(v, "title").unwrap_or_else(|| "Untitled video".into()),
         channel_url: channel_id
             .as_ref()
@@ -187,6 +208,14 @@ pub fn command(config: &Config) -> Result<Command> {
     Ok(cmd)
 }
 pub fn extract(url: &str, config: &Config, stop: &Cancel) -> Result<Source> {
+    extract_range(url, None, config, stop)
+}
+pub fn extract_range(
+    url: &str,
+    range: Option<TimeRange>,
+    config: &Config,
+    stop: &Cancel,
+) -> Result<Source> {
     let bytes = subprocess::run(
         command(config)?.args([
             "--no-playlist",
@@ -200,12 +229,24 @@ pub fn extract(url: &str, config: &Config, stop: &Cancel) -> Result<Source> {
         Duration::from_secs(90),
         |_| {},
     )?;
-    source(&serde_json::from_slice(&bytes).context("Invalid metadata from yt-dlp")?)
+    let value: Value = serde_json::from_slice(&bytes).context("Invalid metadata from yt-dlp")?;
+    let mut source = source(&value)?;
+    source.range = TimeRange::normalized(range)?;
+    if let Some(range) = source.range {
+        range.check_duration(value["duration"].as_f64())?;
+    }
+    Ok(source)
 }
-pub fn preview(text: &str, all: bool, config: &Config, stop: &Cancel) -> Result<Preview> {
+pub fn preview(
+    text: &str,
+    all: bool,
+    range: Option<TimeRange>,
+    config: &Config,
+    stop: &Cancel,
+) -> Result<Preview> {
     let target = input(text, all)?;
     if !target.playlist {
-        let s = extract(&target.url, config, stop)?;
+        let s = extract_range(&target.url, range, config, stop)?;
         return Ok(Preview {
             url: target.url,
             title: s.original_title.clone(),
@@ -260,15 +301,14 @@ pub struct DownloadProgress {
     pub total: Option<u64>,
     pub speed: Option<f64>,
     pub eta: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processed_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing_total_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing_speed: Option<f64>,
 }
-pub fn download(
-    source: &Source,
-    stage: &Path,
-    config: &Config,
-    stop: &Cancel,
-    mut progress: impl FnMut(DownloadProgress),
-) -> Result<PathBuf> {
-    std::fs::create_dir_all(stage)?;
+fn download_tools(stage: &Path, config: &Config) -> Result<PathBuf> {
     let bin = stage.join("tools");
     std::fs::create_dir_all(&bin)?;
     for (name, path) in [
@@ -278,7 +318,38 @@ pub fn download(
         let executable = subprocess::executable(path, name)?;
         std::os::unix::fs::symlink(executable, bin.join(name))?;
     }
+    Ok(bin)
+}
+
+fn apply_range(cmd: &mut Command, source: &Source) -> Result<()> {
+    source.validate()?;
+    if let Some(range) = TimeRange::normalized(source.range)? {
+        cmd.arg("--download-sections")
+            .arg(range.section())
+            .arg("--no-force-keyframes-at-cuts")
+            .args([
+                "--downloader-args",
+                "ffmpeg:-progress pipe:1 -nostats -stats_period 1",
+                "--no-simulate",
+                "--print",
+                "before_dl:VTAMP_DURATION %(duration)j",
+            ]);
+    }
+    Ok(())
+}
+
+pub fn download(
+    source: &Source,
+    stage: &Path,
+    config: &Config,
+    stop: &Cancel,
+    mut progress: impl FnMut(DownloadProgress),
+) -> Result<PathBuf> {
+    std::fs::create_dir_all(stage)?;
+    let bin = download_tools(stage, config)?;
+    let mut parser = progress::ProgressParser::new(source.range);
     let mut cmd = command(config)?;
+    apply_range(&mut cmd, source)?;
     cmd.args([
         "--no-playlist",
         "-f",
@@ -309,17 +380,8 @@ pub fn download(
         stop,
         Duration::from_secs(6 * 3600),
         |line| {
-            if let Some(json) = line.strip_prefix("VTAMP_PROGRESS ")
-                && let Ok(v) = serde_json::from_str::<Value>(json)
-            {
-                progress(DownloadProgress {
-                    bytes: v["downloaded_bytes"].as_u64(),
-                    total: v["total_bytes"]
-                        .as_u64()
-                        .or_else(|| v["total_bytes_estimate"].as_u64()),
-                    speed: v["speed"].as_f64(),
-                    eta: v["eta"].as_f64(),
-                });
+            if let Some(value) = parser.line(line) {
+                progress(value);
             }
         },
     )?;
@@ -338,8 +400,13 @@ pub fn download_video(
     mut progress: impl FnMut(DownloadProgress),
 ) -> Result<PathBuf> {
     let raw = stage.join("picture.%(ext)s");
+    let bin = download_tools(stage, config)?;
+    let mut parser = progress::ProgressParser::new(source.range);
+    let mut cmd = command(config)?;
+    apply_range(&mut cmd, source)?;
     subprocess::run(
-        command(config)?
+        cmd.arg("--ffmpeg-location")
+            .arg(bin)
             .args([
                 "--no-playlist",
                 "-f",
@@ -359,17 +426,8 @@ pub fn download_video(
         stop,
         Duration::from_secs(6 * 3600),
         |line| {
-            if let Some(json) = line.strip_prefix("VTAMP_PROGRESS ")
-                && let Ok(v) = serde_json::from_str::<Value>(json)
-            {
-                progress(DownloadProgress {
-                    bytes: v["downloaded_bytes"].as_u64(),
-                    total: v["total_bytes"]
-                        .as_u64()
-                        .or_else(|| v["total_bytes_estimate"].as_u64()),
-                    speed: v["speed"].as_f64(),
-                    eta: v["eta"].as_f64(),
-                });
+            if let Some(value) = parser.line(line) {
+                progress(value);
             }
         },
     )?;
@@ -454,61 +512,4 @@ fn bounded_cover(image: image::DynamicImage) -> image::RgbImage {
     image.thumbnail(512, 512).to_rgb8()
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn urls_choose_video_without_accidentally_importing_playlist() {
-        assert!(
-            !input(
-                "https://www.youtube.com/watch?v=lO3lG-qXU14&list=PLtest",
-                false
-            )
-            .unwrap()
-            .playlist
-        );
-        assert!(
-            input(
-                "https://www.youtube.com/watch?v=lO3lG-qXU14&list=PLtest",
-                true
-            )
-            .unwrap()
-            .playlist
-        );
-        assert!(input("https://youtube.com.evil.test/watch?v=lO3lG-qXU14", false).is_err());
-        assert!(input("file:///tmp/a", false).is_err());
-        assert!(input("https://youtube.com/@channel", false).is_err());
-        assert_eq!(
-            input("https://youtu.be/lO3lG-qXU14?t=3", false)
-                .unwrap()
-                .url,
-            video_url("lO3lG-qXU14")
-        );
-    }
-
-    #[test]
-    fn thumbnails_keep_their_aspect_ratio_and_stay_bounded() {
-        // Imported covers must not be cropped or padded: the client decides
-        // how to fit them, so a wide image can still be drawn in full.
-        for (width, height, expected) in [
-            (1280, 720, (512, 288)),
-            (720, 1280, (288, 512)),
-            (720, 720, (512, 512)),
-        ] {
-            let cover = bounded_cover(image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
-                width,
-                height,
-                image::Rgb([40, 120, 180]),
-            )));
-            assert_eq!(
-                (cover.width(), cover.height()),
-                expected,
-                "{width}x{height} must keep its shape"
-            );
-            let pad = cover
-                .pixels()
-                .filter(|p| p.0.iter().all(|c| c.abs_diff(24) < 8))
-                .count();
-            assert_eq!(pad, 0, "{width}x{height} must not gain padding");
-        }
-    }
-}
+mod tests;

@@ -203,6 +203,10 @@ pub enum SleepAction {
     Cancel,
 }
 
+fn parse_import_time(input: &str) -> Result<u64, String> {
+    crate::youtube::parse_time(input).map_err(|e| format!("{e:#}"))
+}
+
 fn parse_duration(input: &str) -> Result<u64, String> {
     let (digits, factor) = if let Some(s) = input.strip_suffix('s') {
         (s, 1000)
@@ -373,6 +377,12 @@ pub enum Library {
         /// Download audio only without asking.
         #[arg(long)]
         audio_only: bool,
+        /// Start a single-video download at seconds, M:SS or H:MM:SS.
+        #[arg(long, value_parser = parse_import_time, conflicts_with = "playlist")]
+        start: Option<u64>,
+        /// End a single-video download at seconds, M:SS or H:MM:SS.
+        #[arg(long, value_parser = parse_import_time, conflicts_with = "playlist")]
+        end: Option<u64>,
         /// Import the whole playlist from a watch URL that also contains a list.
         #[arg(long,conflicts_with_all=["title","artist"])]
         playlist: bool,
@@ -615,6 +625,8 @@ pub async fn run(args: Args) -> Result<()> {
                     clipboard,
                     video,
                     audio_only,
+                    start,
+                    end,
                     playlist,
                     preview,
                     title,
@@ -643,9 +655,17 @@ pub async fn run(args: Args) -> Result<()> {
                     artist,
                     video_ids: None,
                     source_title: None,
+                    range: (start.is_some() || end.is_some()).then_some(
+                        crate::youtube::TimeRange {
+                            start_ms: start.unwrap_or(0),
+                            end_ms: end,
+                        },
+                    ),
                     video,
                 };
-                request.validate()?;
+                request
+                    .validate()
+                    .map_err(|error| ApiError::new("invalid_arguments", format!("{error:#}")))?;
                 if preview {
                     let result = preview_import(&client, request).await?;
                     return output(Reply::success(result), args.json);
@@ -693,6 +713,8 @@ pub async fn run(args: Args) -> Result<()> {
             if clipboard
                 || video
                 || audio_only
+                || start.is_some()
+                || end.is_some()
                 || playlist
                 || preview
                 || title.is_some()
@@ -1790,7 +1812,12 @@ pub(crate) async fn preview_import(
     let mut task = tokio::task::spawn_blocking(move || -> Result<_> {
         let config = crate::import_config::Config::load(&paths)?;
         let (preview, metadata) = if !request_clone.playlist {
-            let source = crate::youtube::extract(&request_clone.url, &config, &worker_stop)?;
+            let source = crate::youtube::extract_range(
+                &request_clone.url,
+                request_clone.range,
+                &config,
+                &worker_stop,
+            )?;
             let mut m = crate::metadata::resolve(&source, &config, &paths, &worker_stop);
             if let Some(t) = request_clone.title {
                 m.title = t;
@@ -1811,7 +1838,7 @@ pub(crate) async fn preview_import(
             (preview, Some(m))
         } else {
             (
-                crate::youtube::preview(&request_clone.url, true, &config, &worker_stop)?,
+                crate::youtube::preview(&request_clone.url, true, None, &config, &worker_stop)?,
                 None,
             )
         };
@@ -1828,13 +1855,18 @@ pub(crate) async fn preview_import(
     if let Ok(reply) = client
         .request(Command::ImportLookup {
             video_ids: preview.items.iter().map(|v| v.video_id.clone()).collect(),
+            range: request.range,
         })
         .await
         && let Ok(data) = reply.into_data()
     {
         preview.existing = data["video_ids"].as_array().map(Vec::len);
     }
-    Ok(serde_json::json!({"preview":preview,"metadata":metadata}))
+    let mut result = serde_json::json!({"preview":preview,"metadata":metadata});
+    if let Some(range) = request.range {
+        result["range"] = serde_json::json!(range);
+    }
+    Ok(result)
 }
 async fn wait_for_import(
     client: &Client,
@@ -1930,6 +1962,8 @@ pub fn command_with_features(available: bool) -> clap::Command {
                         "clipboard",
                         "video",
                         "audio_only",
+                        "start",
+                        "end",
                         "playlist",
                         "preview",
                         "title",

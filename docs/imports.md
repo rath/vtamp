@@ -29,8 +29,8 @@ shell, especially when they contain `&`. In the CLI, a watch URL with a `list`
 parameter imports only that video; add `--playlist` to import the whole list.
 A playlist URL imports the list. Lists are limited to 10,000 entries.
 Unavailable videos produce item failures; other videos continue. Live/upcoming broadcasts are
-rejected. Existing source video IDs with present audio files are skipped unless
-`--video` can add a missing or damaged video. That upgrade preserves the audio,
+rejected. Existing source video ID/time-range pairs with present audio files are
+skipped unless `--video` can add a missing or damaged video. That upgrade preserves the audio,
 track ID, metadata overrides, and Queue.
 
 Interactive CLI imports ask **Download video too?**, defaulting to no. `--video`
@@ -99,8 +99,48 @@ copies. Saved video is exported as an MKV with sound, using installed FFmpeg and
 FFprobe; restore separates its picture stream back into the silent `video.mkv`.
 Source information and overrides, including a cleared album, remain in the manifest. Restored YouTube resources use the usual managed directory and
 remain compatible with rescanning, retagging, cover refresh, and managed deletion.
-Existing video IDs are skipped as complete archive entries; restore does not
+Existing video ID/range pairs are skipped as complete archive entries; restore does not
 upgrade their sidecars. Historical download job reports are not restored.
+
+## Download a time range
+
+Single-video downloads can save an excerpt instead of the entire source:
+
+```sh
+vtamp library add 'https://youtu.be/VIDEO_ID' --start 1:23 --end 2:45 --audio-only --wait
+vtamp library add 'https://youtu.be/VIDEO_ID' --start 83 --end 165 --video --wait
+```
+
+Use whole seconds, `M:SS`, or `H:MM:SS`; colon-separated seconds and subordinate
+minutes must have two digits between 00 and 59. Negative and fractional input is
+rejected. Omit Start for the beginning or End for the end of the video. Both
+blank (or start zero with no end) downloads the full source. End must be after
+Start. The importer checks the original duration before downloading an excerpt;
+unknown length, a start at/past the end, or an end beyond the source fails the job.
+These options require one video and are unavailable for playlist imports.
+
+Full downloads and different excerpts coexist as separate Library tracks. Equivalent
+times such as `83` and `1:23` identify the same excerpt. An open-ended range remains
+distinct from one with an explicit end. Library, Queue, and import history display
+the range without changing title metadata. Deleting an excerpt leaves the full
+track and other excerpts intact. Retries and video upgrades retain the range.
+
+Both audio and video use yt-dlp's section download with FFmpeg stream copy.
+Cuts do not force keyframes or re-encode the video: AV1 stays AV1, VP9 stays VP9,
+and compressed video packets are preserved. Start/end boundaries are approximate
+at source packet/keyframe boundaries; exact frame cuts are intentionally not used.
+The usual m4a audio extraction/conversion policy remains unchanged. The same
+requested range is passed to both downloads, but keyframe alignment can change
+the actual saved video boundaries and duration. The player uses the saved audio's
+duration. Existing downloads are not rewritten.
+
+During section processing, Imports shows **Copying video clip** with processed
+media time, percentage when the requested duration is known, processing speed,
+and estimated remaining time when available. These updates come from FFmpeg,
+not a timer or download byte count. Normal video transfers also show their download
+progress. Full downloads keep the existing extraction/remux behavior.
+The range and download choice are not saved as preferences. `--preview` validates
+the range without creating a server, database, or job.
 
 ## Delete a downloaded track
 
@@ -110,7 +150,7 @@ deleted from disk, all queued copies will be removed, and playback will stop if
 this is the current track. Enter deletes; Esc cancels. The equivalent CLI command
 is `vtamp library delete TRACK_ID` and deletes without an interactive prompt.
 
-Deletion is limited to vtamp's own `imports/youtube/VIDEO_ID` directories with
+Deletion is limited to vtamp's own full or excerpt directories under `imports/youtube/` with
 matching source records. Files registered through `library add FOLDER` are
 original files, not copies, and cannot be deleted this way. Remove a folder
 registration with `library remove FOLDER` instead. Radio entries are unregistered
@@ -137,8 +177,15 @@ In the TUI, press `a` and paste a URL into the existing add prompt. YouTube URLs
 with a `list` parameter automatically open a preview of the whole playlist,
 including watch and short links. Tab or Space switches between **Audio only** and **Audio + video · up to 480p**;
 Enter confirms that choice for all entries, and Esc cancels without starting an
-import. A single-video URL opens **Download video too?** with Audio only selected;
-Tab/arrow keys choose, Enter imports, and Esc cancels.
+import. A single-video URL shows **Audio only** and **Audio + video · up to 480p**
+as two visible choices, with Audio only selected, followed by **Time range: Off**.
+Tab/Shift-Tab or Up/Down moves between rows; focusing an audio/video row selects
+it. Down or Tab from Audio only therefore selects video. Left/Right or Space
+switches audio/video or turns the range on/off. Enabling the range reveals
+**Start** and **End**. Type a time, Backspace to edit, or Ctrl-U to clear; the real
+terminal cursor stays at the field. Enter imports and Esc cancels. Invalid times
+remain editable with an inline error. Collapsing the range ignores its draft;
+each new import starts with audio only and the range off.
 Press `i` for the import history: each row shows a source title and its status,
 with the selected import's results and full title below. Use `j`/`k` to select a
 job, `[`/`]` to select a track within a playlist, PgUp/PgDn to scroll the details,
@@ -200,15 +247,16 @@ contains this information in `source` (`provider: youtube`).
 Audio downloads prefer m4a; FFmpeg extracts/converts to m4a when needed. Opt-in
 video downloads choose the best stream at or below 480 pixels high, without a
 higher-resolution fallback or upscaling. FFmpeg remuxes the picture stream into
-silent `video.mkv` without re-encoding; FFprobe validates its dimensions and timing.
+silent `video.mkv` without further re-encoding; FFprobe validates its dimensions and timing.
 Audio is registered first. Video failure or cancellation never removes that audio. Thumbnails are stored at up to 512 pixels on the long side, keeping the
 image's own shape like album art: nothing is cropped or padded on disk, and the
 player sizes its cover area to the image so a wide thumbnail is drawn in full.
 Missing/failed artwork does not fail the audio import.
-Completed files live under the data directory's `imports/youtube/VIDEO_ID/` with
+Completed full downloads live under the data directory's `imports/youtube/VIDEO_ID/` with
 `audio.m4a`, optional `cover.jpg` and `video.mkv`, and `source.json`. Temporary files stay under
-`imports/.staging/` and are excluded from scans. Publication waits for scans and
-catalog changes; retry can recover a completed directory after a failed database
+`imports/.staging/` and are excluded from scans. Excerpts use the sibling directory
+`imports/youtube/VIDEO_ID--START_MS-END_MS/`, with `end` for an omitted end time.
+Publication waits for scans and catalog changes; retry can recover a completed directory after a failed database
 commit. Library deduplication does not remove intentional queue duplicates.
 
 ## Terminal video (macOS)

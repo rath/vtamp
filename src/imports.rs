@@ -22,6 +22,8 @@ pub struct ImportRequest {
     pub url: String,
     pub playlist: bool,
     pub video: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<youtube::TimeRange>,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub video_ids: Option<Vec<String>>,
@@ -34,6 +36,10 @@ impl ImportRequest {
         let input = youtube::input(&self.url, self.playlist)?;
         self.url = input.url;
         self.playlist = input.playlist;
+        if self.playlist && self.range.is_some() {
+            bail!("Time ranges require a single video");
+        }
+        self.range = youtube::TimeRange::normalized(self.range)?;
         if self.playlist && (self.title.is_some() || self.artist.is_some()) {
             bail!("Title and artist overrides require a single video");
         }
@@ -72,6 +78,8 @@ pub fn validate_text(s: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportJob {
     pub job_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<youtube::TimeRange>,
     pub url: String,
     pub title: String,
     pub status: String,
@@ -99,6 +107,7 @@ impl ImportJob {
     pub fn new(request: &ImportRequest) -> Self {
         Self {
             job_id: uuid::Uuid::new_v4().to_string(),
+            range: request.range,
             url: request.url.clone(),
             title: request
                 .source_title
@@ -158,23 +167,24 @@ impl ImportJob {
             .bytes
             .map(|b| format!(" · {:.1} MiB", b as f64 / 1048576.))
             .unwrap_or_default();
+        let processing = p.processing_summary();
+        let transfer = processing.map_or_else(
+            || format!("{percent}{bytes}{speed}{eta}"),
+            |value| format!(" · {value}"),
+        );
         let elapsed = self
             .finished_at_ms
             .unwrap_or_else(unix_ms)
             .saturating_sub(self.started_at_ms)
             / 1000;
         format!(
-            "{}/{} · {} · {}{}{}{}{} · {elapsed}s · Added {} · Updated {} · Skipped {} · Failed {} · Video failed {}",
+            "{}/{} · {} · {}{transfer} · {elapsed}s · Added {} · Updated {} · Skipped {} · Failed {} · Video failed {}",
             self.added + self.updated + self.skipped + self.failed,
             self.total
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "?".into()),
             self.stage,
             self.current_title.as_deref().unwrap_or(&self.title),
-            percent,
-            bytes,
-            speed,
-            eta,
             self.added,
             self.updated,
             self.skipped,
@@ -316,7 +326,7 @@ fn work(
                 .collect(),
         }
     } else {
-        youtube::preview(&request.url, request.playlist, config, stop)?
+        youtube::preview(&request.url, request.playlist, request.range, config, stop)?
     };
     if job.title == job.url {
         job.title = preview.title;
@@ -353,7 +363,10 @@ fn work(
                 bail!("Video is unavailable or has no valid ID");
             }
             let (tx, rx) = mpsc::sync_channel(1);
-            if !send(Message::Lookup(item.video_id.clone(), tx)) {
+            if !send(Message::Lookup(
+                youtube::resource_key(&item.video_id, request.range),
+                tx,
+            )) {
                 bail!("Server stopped");
             }
             let existing = wait(rx, stop)?;
@@ -377,10 +390,11 @@ fn work(
                 return Ok(());
             }
             // A completed directory can survive a failed DB commit; retry adopts it.
-            let final_dir = paths.data.join("imports/youtube").join(&item.video_id);
-            let recovered = read_manifest(&final_dir).ok().filter(|m| {
-                m.source.video_id == item.video_id && final_dir.join("audio.m4a").is_file()
-            });
+            let key = youtube::resource_key(&item.video_id, request.range);
+            let final_dir = paths.data.join("imports/youtube").join(&key);
+            let recovered = read_manifest(&final_dir)
+                .ok()
+                .filter(|m| m.source.key() == key && final_dir.join("audio.m4a").is_file());
             let temp_root = paths.data.join("imports/.staging");
             crate::platform::private_dir(&temp_root)?;
             let temporary = tempfile::Builder::new()
@@ -404,7 +418,12 @@ fn work(
                 manifest
             } else {
                 update(job, "resolving", send);
-                let source = youtube::extract(&youtube::video_url(&item.video_id), config, stop)?;
+                let source = youtube::extract_range(
+                    &youtube::video_url(&item.video_id),
+                    request.range,
+                    config,
+                    stop,
+                )?;
                 if source.video_id != item.video_id {
                     bail!("Extractor returned a different video");
                 }
@@ -418,8 +437,15 @@ fn work(
                 update(job, "downloading", send);
                 let mut last = Instant::now() - Duration::from_secs(1);
                 youtube::download(&source, stage, config, stop, |progress| {
+                    let stage = if progress.processed_ms.is_some() {
+                        "processing_audio"
+                    } else {
+                        "downloading"
+                    };
+                    let changed = job.stage != stage;
+                    job.stage = stage.into();
                     job.progress = progress;
-                    if last.elapsed() >= Duration::from_millis(250) {
+                    if changed || last.elapsed() >= Duration::from_millis(250) {
                         job.revision += 1;
                         send(Message::Progress(job.clone()));
                         last = Instant::now();
@@ -451,7 +477,7 @@ fn work(
             if !stage.join(crate::video::FILE).exists()
                 && old_video.symlink_metadata().is_ok_and(|m| m.is_file())
                 && read_manifest(&final_dir).is_ok_and(|m| {
-                    m.track_id == manifest.track_id && m.source.video_id == manifest.source.video_id
+                    m.track_id == manifest.track_id && m.source.key() == manifest.source.key()
                 })
             {
                 std::fs::copy(old_video, stage.join(crate::video::FILE))?;
@@ -538,20 +564,18 @@ pub fn read_manifest(dir: &std::path::Path) -> Result<Manifest> {
         bail!("Import manifest exceeds 64 KiB");
     }
     let manifest: Manifest = serde_json::from_slice(&bytes)?;
-    if !youtube::valid_id(&manifest.source.video_id) {
-        bail!("Invalid import manifest");
-    }
+    manifest.source.validate()?;
     Ok(manifest)
 }
 pub fn publish(paths: &Paths, publication: &mut Publication) -> Result<()> {
     let root = paths.data.join("imports/youtube");
     crate::platform::private_dir(&root)?;
-    let destination = root.join(&publication.manifest.source.video_id);
+    let destination = root.join(publication.manifest.source.key());
     if destination.exists() {
         // Only replace a directory with our own matching manifest; never arbitrary user files.
         let old = read_manifest(&destination)
             .context("Existing import directory is not managed by vtamp")?;
-        if old.source.video_id != publication.manifest.source.video_id {
+        if old.source.key() != publication.manifest.source.key() {
             bail!("Import directory identity mismatch");
         }
         let backup = root.join(format!(".replaced-{}", uuid::Uuid::new_v4()));
@@ -596,9 +620,12 @@ fn add_video(
     stop: &Cancel,
     send: &impl Fn(Message) -> bool,
 ) -> Result<()> {
-    let dir = paths.data.join("imports/youtube").join(&item.video_id);
+    let dir = paths
+        .data
+        .join("imports/youtube")
+        .join(youtube::resource_key(&item.video_id, job.range));
     let manifest = read_manifest(&dir)?;
-    if manifest.source.video_id != item.video_id
+    if manifest.source.key() != youtube::resource_key(&item.video_id, job.range)
         || item.track_id.as_ref() != Some(&manifest.track_id)
     {
         bail!("Managed video identity mismatch");
@@ -612,17 +639,41 @@ fn add_video(
     }
     item.video_status = Some("downloading".into());
     job.progress = Default::default();
-    update(job, "downloading_video", send);
+    update(
+        job,
+        if manifest.source.range.is_some() {
+            "resolving_video"
+        } else {
+            "downloading_video"
+        },
+        send,
+    );
     if !send(Message::Item(job.clone(), Box::new(item.clone()))) {
         bail!("Server stopped");
     }
     let root = paths.data.join("imports/.staging");
     crate::platform::private_dir(&root)?;
     let stage = tempfile::Builder::new().prefix("video-").tempdir_in(root)?;
+    if manifest.source.range.is_some() {
+        youtube::extract_range(
+            &youtube::video_url(&item.video_id),
+            manifest.source.range,
+            config,
+            stop,
+        )?;
+    }
+    update(job, "downloading_video", send);
     let mut last = Instant::now() - Duration::from_secs(1);
     youtube::download_video(&manifest.source, stage.path(), config, stop, |progress| {
+        let stage = if progress.processed_ms.is_some() {
+            "processing_video"
+        } else {
+            "downloading_video"
+        };
+        let changed = job.stage != stage;
+        job.stage = stage.into();
         job.progress = progress;
-        if last.elapsed() >= Duration::from_millis(250) {
+        if changed || last.elapsed() >= Duration::from_millis(250) {
             job.revision += 1;
             send(Message::Progress(job.clone()));
             last = Instant::now();
@@ -656,7 +707,10 @@ fn add_video(
 
 pub fn publish_video(paths: &Paths, p: &VideoPublication, record: &Record) -> Result<()> {
     let dir = crate::deletion::managed_path(paths, &record.track)?;
-    let expected = paths.data.join("imports/youtube").join(&p.item.video_id);
+    let expected = paths
+        .data
+        .join("imports/youtube")
+        .join(youtube::resource_key(&p.item.video_id, p.job.range));
     if dir.canonicalize()? != expected.canonicalize()?
         || p.item.track_id.as_ref() != Some(&record.track.id)
     {

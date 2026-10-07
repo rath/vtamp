@@ -45,13 +45,18 @@ if '--flat-playlist' in args:
 if video=='FAILED00001' and not (base/'repair').exists():
  print('Video unavailable',file=sys.stderr);sys.exit(1)
 if '--dump-single-json' in args:
- print(json.dumps({{'id':video,'title':"이승환 + 정준일 '어떻게 사랑이 그래요'",'channel':'이승환 LEE SEUNG HWAN','channel_id':'UCtest','live_status':'not_live','album':(base/'album').read_text() if (base/'album').exists() else None}}));sys.exit(0)
+ print(json.dumps({{'id':video,'title':"이승환 + 정준일 '어떻게 사랑이 그래요'",'channel':'이승환 LEE SEUNG HWAN','channel_id':'UCtest','live_status':'not_live','duration':None if (base/'no_duration').exists() else 600,'album':(base/'album').read_text() if (base/'album').exists() else None}}));sys.exit(0)
 if '--skip-download' in args:
  assert '--write-thumbnail' in args
  if not (base/'nothumb').exists():
   shutil.copyfile(base/'art.png',pathlib.Path(args[args.index('-o')+1].replace('%(ext)s','png')))
  sys.exit(0)
 if '-f' in args and args[args.index('-f')+1]=='bestvideo[height<=480]/best[height<=480]':
+ if (base/'copying_progress').exists():
+  print('VTAMP_DURATION 600',flush=True)
+  for seconds in (10,20,30):
+   print('out_time_us='+str(seconds*1000000)+'\nspeed=2.0x\nprogress=continue',flush=True)
+   time.sleep(.6)
  if (base/'slow_video').exists(): time.sleep(60)
  if (base/'fail_video').exists(): print('Video download failed',file=sys.stderr);sys.exit(1)
  pathlib.Path(args[args.index('-o')+1].replace('%(ext)s','webm')).write_bytes(b'SILENT VIDEO')
@@ -96,6 +101,14 @@ print('VTAMP_FILE '+json.dumps(str(out)))
         );
         serde_json::from_slice::<Value>(&o.stdout).unwrap()["data"].clone()
     }
+    fn add_range(&self, clipped: bool, options: &[&str]) -> Value {
+        let mut args = vec!["library", "add", URL];
+        args.extend_from_slice(options);
+        if clipped {
+            args.extend_from_slice(&["--start", "10", "--end", "20"]);
+        }
+        self.ok(&args)
+    }
     fn wait(&self, id: &str) -> Value {
         let start = Instant::now();
         loop {
@@ -120,6 +133,216 @@ impl Drop for Harness {
     }
 }
 const URL: &str = "https://www.youtube.com/watch?v=lO3lG-qXU14";
+
+#[test]
+fn video_copying_progress_advances_without_network_transfer_updates() {
+    let h = Harness::new();
+    h.ok(&["server", "start", "--headless"]);
+    h.ok(&["volume", "0"]);
+    fs::write(h.home.path().join("bin/copying_progress"), "").unwrap();
+    let started = h.ok(&[
+        "library", "add", URL, "--start", "10", "--end", "130", "--video",
+    ]);
+    let id = started["job_id"].as_str().unwrap();
+    let deadline = Instant::now();
+    let mut times = std::collections::BTreeSet::new();
+    loop {
+        let status = h.ok(&["library", "import-status", id]);
+        let job = &status["job"];
+        if job["stage"] == "processing_video" {
+            times.insert(job["progress"]["processed_ms"].as_u64().unwrap());
+            assert_eq!(job["progress"]["processing_total_ms"], 120_000);
+            assert_eq!(job["progress"]["processing_speed"], 2.0);
+            assert!(job["progress"]["bytes"].is_null());
+            assert!(job["progress"]["speed"].is_null());
+            assert!(job["progress"]["eta"].as_f64().unwrap() > 0.0);
+        }
+        if job["finished_at_ms"].is_number() {
+            assert_eq!(job["status"], "completed");
+            assert_eq!(status["items"][0]["video_status"], "ready");
+            break;
+        }
+        assert!(deadline.elapsed() < Duration::from_secs(15), "{status}");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(
+        times.len() >= 2,
+        "Expected advancing processing updates, got {times:?}"
+    );
+    let playback = h.ok(&["status"]);
+    assert_eq!(playback["status"], "stopped");
+    assert_eq!(playback["queue"], json!([]));
+}
+
+#[test]
+fn ranges_coexist_deduplicate_upgrade_rescan_and_delete_independently() {
+    let h = Harness::new();
+    let range = json!({"start_ms":83000,"end_ms":165000});
+    let preview = h.ok(&[
+        "library",
+        "add",
+        URL,
+        "--start",
+        "1:23",
+        "--end",
+        "2:45",
+        "--preview",
+    ]);
+    assert_eq!(preview["range"], range);
+    assert!(!h.home.path().join("state.db").exists());
+    h.ok(&["server", "start", "--headless"]);
+    h.ok(&["volume", "0"]);
+    let first = h.ok(&[
+        "library", "add", URL, "--start", "83", "--end", "165", "--wait",
+    ]);
+    assert_eq!(first["job"]["range"], range);
+    let clip = first["items"][0]["track_id"].as_str().unwrap();
+    assert_eq!(
+        h.ok(&["library", "add", URL, "--preview"])["preview"]["existing"],
+        0
+    );
+    assert_eq!(
+        h.ok(&[
+            "library",
+            "add",
+            URL,
+            "--start",
+            "1:23",
+            "--end",
+            "2:45",
+            "--preview"
+        ])["preview"]["existing"],
+        1
+    );
+    let full = h.ok(&["library", "add", URL, "--wait"]);
+    let full_id = full["items"][0]["track_id"].as_str().unwrap();
+    let tail = h.ok(&["library", "add", URL, "--start", "3:00", "--wait"]);
+    let tail_id = tail["items"][0]["track_id"].as_str().unwrap();
+    assert_ne!(clip, full_id);
+    assert_ne!(clip, tail_id);
+    assert_eq!(h.ok(&["library", "list"])["total"], 3);
+    let duplicate = h.ok(&[
+        "library", "add", URL, "--start", "0:01:23", "--end", "2:45", "--wait",
+    ]);
+    assert_eq!(duplicate["job"]["skipped"], 1);
+    assert_eq!(duplicate["items"][0]["track_id"], clip);
+    h.ok(&["queue", "add", "--track", full_id]);
+    h.ok(&["queue", "add", "--track", clip]);
+    h.ok(&["library", "edit", clip, "--title", "My excerpt"]);
+    let before = h.ok(&["status"]);
+    let upgraded = h.ok(&[
+        "library", "add", URL, "--start", "83", "--end", "165", "--video", "--wait",
+    ]);
+    assert_eq!(upgraded["job"]["updated"], 1);
+    assert_eq!(upgraded["items"][0]["track_id"], clip);
+    assert_eq!(
+        h.ok(&["status"])["queue_revision"],
+        before["queue_revision"]
+    );
+    h.ok(&["library", "scan", "--wait"]);
+    let saved = h.ok(&["library", "track", clip]);
+    assert_eq!(saved["title"], "My excerpt");
+    assert_eq!(saved["source"]["range"], range);
+    assert_eq!(saved["video"], true);
+    assert!(
+        saved["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("lO3lG-qXU14--83000-165000/audio.m4a")
+    );
+    h.ok(&["library", "cover", "refresh", clip, "--wait"]);
+    h.ok(&["server", "stop"]);
+    h.ok(&["server", "start", "--headless"]);
+    assert_eq!(h.ok(&["library", "track", clip])["source"]["range"], range);
+    h.ok(&["library", "delete", clip]);
+    h.ok(&["library", "scan", "--wait"]);
+    assert_eq!(h.ok(&["library", "list"])["total"], 2);
+    assert!(
+        PathBuf::from(
+            h.ok(&["library", "track", full_id])["path"]
+                .as_str()
+                .unwrap()
+        )
+        .is_file()
+    );
+    assert!(
+        PathBuf::from(
+            h.ok(&["library", "track", tail_id])["path"]
+                .as_str()
+                .unwrap()
+        )
+        .is_file()
+    );
+    assert_eq!(h.ok(&["status"])["queue"].as_array().unwrap().len(), 1);
+
+    let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
+    let calls: Vec<Vec<String>> = calls
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let clips: Vec<_> = calls
+        .iter()
+        .filter(|args| args.iter().any(|s| s == "--download-sections"))
+        .collect();
+    assert_eq!(clips.len(), 3, "two audio excerpts and one video upgrade");
+    for args in clips {
+        assert!(args.iter().any(|s| s == "--no-force-keyframes-at-cuts"));
+        assert!(!args.iter().any(|s| s == "--force-keyframes-at-cuts"));
+        assert!(args.iter().any(|s| s == "--ffmpeg-location"));
+    }
+}
+
+#[test]
+fn range_errors_and_retries_preserve_the_requested_interval() {
+    let h = Harness::new();
+    for args in [
+        vec!["--start", "-1"],
+        vec!["--end", "1:60"],
+        vec!["--start", "20", "--end", "10"],
+        vec!["--playlist", "--start", "1"],
+    ] {
+        let mut command = vec!["library", "add", URL];
+        command.extend(args);
+        assert!(!h.cmd(&command).status.success());
+        assert!(!h.home.path().join("state.db").exists());
+    }
+    for args in [vec!["--start", "600"], vec!["--end", "601"]] {
+        let mut command = vec!["library", "add", URL, "--preview"];
+        command.extend(args);
+        assert!(!h.cmd(&command).status.success());
+        assert!(!h.home.path().join("state.db").exists());
+    }
+    let bin = h.home.path().join("bin");
+    fs::write(bin.join("no_duration"), "").unwrap();
+    assert!(
+        !h.cmd(&["library", "add", URL, "--start", "1", "--preview"])
+            .status
+            .success()
+    );
+    fs::remove_file(bin.join("no_duration")).unwrap();
+    h.ok(&["server", "start", "--headless"]);
+    h.ok(&["volume", "0"]);
+    fs::write(bin.join("fail_video"), "").unwrap();
+    let first = h.ok(&[
+        "library", "add", URL, "--start", "10", "--end", "20", "--video",
+    ]);
+    let failed = h.wait(first["job_id"].as_str().unwrap());
+    assert_eq!(failed["job"]["status"], "partial");
+    let id = failed["items"][0]["track_id"].as_str().unwrap();
+    fs::remove_file(bin.join("fail_video")).unwrap();
+    h.ok(&["server", "stop"]);
+    h.ok(&["server", "start", "--headless"]);
+    let retry = h.ok(&["library", "import-retry", first["job_id"].as_str().unwrap()]);
+    let result = h.wait(retry["job_id"].as_str().unwrap());
+    assert_eq!(
+        result["job"]["range"],
+        json!({"start_ms":10000,"end_ms":20000})
+    );
+    assert_eq!(result["job"]["updated"], 1);
+    assert_eq!(result["items"][0]["track_id"], id);
+    assert_eq!(h.ok(&["library", "list"])["total"], 1);
+}
+
 #[tokio::test]
 async fn managed_download_deletion_removes_queued_copies_and_can_be_reimported() {
     let h = Harness::new();
@@ -557,54 +780,87 @@ fn imports_use_shared_llm_settings_and_keep_rule_fallback() {
 
 #[test]
 fn failed_catalog_commit_recovers_published_audio_without_redownload() {
-    let h = Harness::new();
-    h.ok(&["server", "start"]);
-    let db = rusqlite::Connection::open(h.home.path().join("state.db")).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_import BEFORE INSERT ON tracks BEGIN SELECT RAISE(FAIL,'injected catalog failure'); END;").unwrap();
-    let started = h.ok(&["library", "add", URL]);
-    let id = started["job_id"].as_str().unwrap();
-    assert_eq!(h.wait(id)["job"]["status"], "failed");
-    assert_eq!(h.ok(&["library", "list"])["total"], 0);
-    assert!(
-        h.home
-            .path()
-            .join("imports/youtube/lO3lG-qXU14/audio.m4a")
-            .is_file()
-    );
-    let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
-    db.execute_batch("DROP TRIGGER fail_import;").unwrap();
-    let retry = h.ok(&["library", "import-retry", id]);
-    assert_eq!(h.wait(retry["job_id"].as_str().unwrap())["job"]["added"], 1);
-    assert_eq!(
-        calls,
-        fs::read_to_string(h.home.path().join("bin/calls")).unwrap()
-    );
-    assert_eq!(h.ok(&["library", "list"])["total"], 1);
+    for clipped in [false, true] {
+        let key = if clipped {
+            "lO3lG-qXU14--10000-20000"
+        } else {
+            "lO3lG-qXU14"
+        };
+        let h = Harness::new();
+        h.ok(&["server", "start", "--headless"]);
+        h.ok(&["volume", "0"]);
+        h.ok(&["server", "start", "--headless"]);
+        let db = rusqlite::Connection::open(h.home.path().join("state.db")).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_import BEFORE INSERT ON tracks BEGIN SELECT RAISE(FAIL,'injected catalog failure'); END;").unwrap();
+        let started = h.add_range(clipped, &[]);
+        let id = started["job_id"].as_str().unwrap();
+        assert_eq!(h.wait(id)["job"]["status"], "failed");
+        assert_eq!(h.ok(&["library", "list"])["total"], 0);
+        assert!(
+            h.home
+                .path()
+                .join(format!("imports/youtube/{key}/audio.m4a"))
+                .is_file()
+        );
+        let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
+        db.execute_batch("DROP TRIGGER fail_import;").unwrap();
+        let retry = h.ok(&["library", "import-retry", id]);
+        assert_eq!(h.wait(retry["job_id"].as_str().unwrap())["job"]["added"], 1);
+        assert_eq!(
+            calls,
+            fs::read_to_string(h.home.path().join("bin/calls")).unwrap()
+        );
+        assert_eq!(h.ok(&["library", "list"])["total"], 1);
+
+        let tracks = h.ok(&["library", "list"]);
+        assert_eq!(
+            tracks["tracks"][0]["source"]["range"],
+            if clipped {
+                json!({"start_ms":10000,"end_ms":20000})
+            } else {
+                Value::Null
+            }
+        );
+    }
 }
 
 #[test]
 fn shutdown_interrupts_jobs_and_restart_requires_explicit_retry() {
-    let h = Harness::new();
-    fs::write(h.home.path().join("bin/slow"), b"").unwrap();
-    let j = h.ok(&["library", "add", URL]);
-    let id = j["job_id"].as_str().unwrap();
-    std::thread::sleep(Duration::from_millis(150));
-    let now = Instant::now();
-    h.ok(&["server", "stop"]);
-    // Wait for the old socket's cleanup before starting a new listener.
-    while h.home.path().join("run/control.sock").exists() {
-        assert!(now.elapsed() < Duration::from_secs(3));
-        std::thread::sleep(Duration::from_millis(20));
+    for clipped in [false, true] {
+        let h = Harness::new();
+        h.ok(&["server", "start", "--headless"]);
+        h.ok(&["volume", "0"]);
+        fs::write(h.home.path().join("bin/slow"), b"").unwrap();
+        let j = h.add_range(clipped, &[]);
+        let id = j["job_id"].as_str().unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        let now = Instant::now();
+        h.ok(&["server", "stop"]);
+        // Wait for the old socket's cleanup before starting a new listener.
+        while h.home.path().join("run/control.sock").exists() {
+            assert!(now.elapsed() < Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        fs::remove_file(h.home.path().join("bin/slow")).unwrap();
+        h.ok(&["server", "start", "--headless"]);
+        assert_eq!(
+            h.ok(&["library", "import-status", id])["job"]["status"],
+            "interrupted"
+        );
+        assert_eq!(h.ok(&["library", "list"])["total"], 0);
+        let retry = h.ok(&["library", "import-retry", id]);
+        assert_eq!(h.wait(retry["job_id"].as_str().unwrap())["job"]["added"], 1);
+
+        let tracks = h.ok(&["library", "list"]);
+        assert_eq!(
+            tracks["tracks"][0]["source"]["range"],
+            if clipped {
+                json!({"start_ms":10000,"end_ms":20000})
+            } else {
+                Value::Null
+            }
+        );
     }
-    fs::remove_file(h.home.path().join("bin/slow")).unwrap();
-    h.ok(&["server", "start"]);
-    assert_eq!(
-        h.ok(&["library", "import-status", id])["job"]["status"],
-        "interrupted"
-    );
-    assert_eq!(h.ok(&["library", "list"])["total"], 0);
-    let retry = h.ok(&["library", "import-retry", id]);
-    assert_eq!(h.wait(retry["job_id"].as_str().unwrap())["job"]["added"], 1);
 }
 
 #[test]
@@ -841,29 +1097,43 @@ fn failed_video_keeps_audio_and_retry_only_downloads_video() {
 
 #[test]
 fn cancelling_video_leaves_registered_audio_and_can_be_retried() {
-    let h = Harness::new();
-    let slow = h.home.path().join("bin/slow_video");
-    fs::write(&slow, b"").unwrap();
-    let job = h.ok(&["library", "add", URL, "--video"]);
-    let id = job["job_id"].as_str().unwrap();
-    let started = Instant::now();
-    loop {
-        let result = h.ok(&["library", "import-status", id]);
-        if result["job"]["stage"] == "downloading_video" && result["job"]["added"] == 1 {
-            break;
+    for clipped in [false, true] {
+        let h = Harness::new();
+        h.ok(&["server", "start", "--headless"]);
+        h.ok(&["volume", "0"]);
+        let slow = h.home.path().join("bin/slow_video");
+        fs::write(&slow, b"").unwrap();
+        let job = h.add_range(clipped, &["--video"]);
+        let id = job["job_id"].as_str().unwrap();
+        let started = Instant::now();
+        loop {
+            let result = h.ok(&["library", "import-status", id]);
+            if result["job"]["stage"] == "downloading_video" && result["job"]["added"] == 1 {
+                break;
+            }
+            assert!(started.elapsed() < Duration::from_secs(15), "{result}");
+            std::thread::sleep(Duration::from_millis(30));
         }
-        assert!(started.elapsed() < Duration::from_secs(15), "{result}");
-        std::thread::sleep(Duration::from_millis(30));
+        h.ok(&["library", "import-cancel", id]);
+        assert_eq!(h.wait(id)["job"]["status"], "cancelled");
+        assert_eq!(h.ok(&["library", "list"])["total"], 1);
+        fs::remove_file(slow).unwrap();
+        let retry = h.ok(&["library", "import-retry", id]);
+        assert_eq!(
+            h.wait(retry["job_id"].as_str().unwrap())["job"]["updated"],
+            1
+        );
+
+        let tracks = h.ok(&["library", "list"]);
+        assert_eq!(
+            tracks["tracks"][0]["source"]["range"],
+            if clipped {
+                json!({"start_ms":10000,"end_ms":20000})
+            } else {
+                Value::Null
+            }
+        );
     }
-    h.ok(&["library", "import-cancel", id]);
-    assert_eq!(h.wait(id)["job"]["status"], "cancelled");
-    assert_eq!(h.ok(&["library", "list"])["total"], 1);
-    fs::remove_file(slow).unwrap();
-    let retry = h.ok(&["library", "import-retry", id]);
-    assert_eq!(
-        h.wait(retry["job_id"].as_str().unwrap())["job"]["updated"],
-        1
-    );
 }
 
 #[test]
@@ -889,36 +1159,55 @@ fn video_preview_is_read_only_and_flags_are_exclusive() {
 
 #[test]
 fn published_video_survives_report_failure_and_audio_repair() {
-    let h = Harness::new();
-    let audio = h.ok(&["library", "add", URL, "--audio-only", "--wait"]);
-    let track = audio["items"][0]["track_id"].clone();
-    let db = rusqlite::Connection::open(h.home.path().join("state.db")).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_video_report BEFORE UPDATE ON import_items WHEN json_extract(NEW.json, '$.video_status') = 'ready' BEGIN SELECT RAISE(FAIL, 'injected video report failure'); END;").unwrap();
-    let job = h.ok(&["library", "add", URL, "--video"]);
-    let failed = h.wait(job["job_id"].as_str().unwrap());
-    assert_eq!(failed["job"]["status"], "partial");
-    let folder = h.home.path().join("imports/youtube/lO3lG-qXU14");
-    assert!(folder.join("video.mkv").exists());
-    db.execute_batch("DROP TRIGGER fail_video_report").unwrap();
-    let retry = h.ok(&["library", "import-retry", job["job_id"].as_str().unwrap()]);
-    let done = h.wait(retry["job_id"].as_str().unwrap());
-    assert_eq!(done["job"]["status"], "completed");
-    assert_eq!(done["items"][0]["video_status"], "ready");
-    assert_eq!(done["items"][0]["track_id"], track);
-    let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
-    assert_eq!(
-        calls
-            .matches("bestvideo[height<=480]/best[height<=480]")
-            .count(),
-        1
-    );
-    fs::remove_file(folder.join("audio.m4a")).unwrap();
-    let repaired = h.ok(&["library", "add", URL, "--audio-only", "--wait"]);
-    assert_eq!(repaired["items"][0]["track_id"], track);
-    assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
-    // Corrupt sidecars are replaceable, without a second audio download.
-    fs::write(folder.join("video.mkv"), b"damaged").unwrap();
-    let replaced = h.ok(&["library", "add", URL, "--video", "--wait"]);
-    assert_eq!(replaced["job"]["updated"], 1);
-    assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+    for clipped in [false, true] {
+        let key = if clipped {
+            "lO3lG-qXU14--10000-20000"
+        } else {
+            "lO3lG-qXU14"
+        };
+        let h = Harness::new();
+        h.ok(&["server", "start", "--headless"]);
+        h.ok(&["volume", "0"]);
+        let audio = h.add_range(clipped, &["--audio-only", "--wait"]);
+        let track = audio["items"][0]["track_id"].clone();
+        let db = rusqlite::Connection::open(h.home.path().join("state.db")).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_video_report BEFORE UPDATE ON import_items WHEN json_extract(NEW.json, '$.video_status') = 'ready' BEGIN SELECT RAISE(FAIL, 'injected video report failure'); END;").unwrap();
+        let job = h.add_range(clipped, &["--video"]);
+        let failed = h.wait(job["job_id"].as_str().unwrap());
+        assert_eq!(failed["job"]["status"], "partial");
+        let folder = h.home.path().join(format!("imports/youtube/{key}"));
+        assert!(folder.join("video.mkv").exists());
+        db.execute_batch("DROP TRIGGER fail_video_report").unwrap();
+        let retry = h.ok(&["library", "import-retry", job["job_id"].as_str().unwrap()]);
+        let done = h.wait(retry["job_id"].as_str().unwrap());
+        assert_eq!(done["job"]["status"], "completed");
+        assert_eq!(done["items"][0]["video_status"], "ready");
+        assert_eq!(done["items"][0]["track_id"], track);
+        let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
+        assert_eq!(
+            calls
+                .matches("bestvideo[height<=480]/best[height<=480]")
+                .count(),
+            1
+        );
+        fs::remove_file(folder.join("audio.m4a")).unwrap();
+        let repaired = h.add_range(clipped, &["--audio-only", "--wait"]);
+        assert_eq!(repaired["items"][0]["track_id"], track);
+        assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+        // Corrupt sidecars are replaceable, without a second audio download.
+        fs::write(folder.join("video.mkv"), b"damaged").unwrap();
+        let replaced = h.add_range(clipped, &["--video", "--wait"]);
+        assert_eq!(replaced["job"]["updated"], 1);
+        assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+
+        let tracks = h.ok(&["library", "list"]);
+        assert_eq!(
+            tracks["tracks"][0]["source"]["range"],
+            if clipped {
+                json!({"start_ms":10000,"end_ms":20000})
+            } else {
+                Value::Null
+            }
+        );
+    }
 }

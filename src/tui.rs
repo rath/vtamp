@@ -690,7 +690,10 @@ pub async fn run(
                                 .filter_map(|v| v["video_id"].as_str().map(str::to_owned))
                                 .collect();
                             if let Ok(reply) = client
-                                .request(Command::ImportLookup { video_ids: ids })
+                                .request(Command::ImportLookup {
+                                    video_ids: ids,
+                                    range: None,
+                                })
                                 .await
                                 && let Ok(existing) = reply.into_data()
                             {
@@ -2052,8 +2055,10 @@ impl App {
                                     }
                                     Ok(()) => {
                                         self.import_ui.scroll = 0;
-                                        self.import_ui.modal =
-                                            Some(imports::Modal::Download { request });
+                                        self.import_ui.modal = Some(imports::Modal::Download {
+                                            request,
+                                            options: Default::default(),
+                                        });
                                     }
                                     Err(e) => self.notice(e.to_string()),
                                 }
@@ -3241,10 +3246,14 @@ fn clamp_selection(state: &mut ListState, len: usize) {
 /// The first row line: the title, with a LIVE or VIDEO suffix that names the
 /// row kind the same way in Library and Queue.
 fn title_label(track: &Track) -> String {
+    let title = track.source.as_ref().and_then(|s| s.range).map_or_else(
+        || track.title.clone(),
+        |r| format!("[{}] {}", r.label(), track.title),
+    );
     match track.kind() {
-        Kind::Radio => format!("{} · LIVE", track.title),
-        Kind::Video => format!("{} · VIDEO", track.title),
-        Kind::Audio => track.title.clone(),
+        Kind::Radio => format!("{title} · LIVE"),
+        Kind::Video => format!("{title} · VIDEO"),
+        Kind::Audio => title,
     }
 }
 
@@ -6399,7 +6408,7 @@ mod tests {
                 app.key(key(KeyCode::Enter), &commands).unwrap();
                 assert!(requests.try_recv().is_err());
                 if video {
-                    app.key(key(KeyCode::Tab), &commands).unwrap();
+                    app.key(key(KeyCode::Down), &commands).unwrap();
                 }
                 for (width, height) in [(40, 12), (100, 24)] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -6411,7 +6420,14 @@ mod tests {
                         .iter()
                         .map(|c| c.symbol())
                         .collect::<String>();
-                    assert!(text.contains("Download video too?"));
+                    assert!(text.contains("Audio only"));
+                    assert!(text.contains("Audio + video · up to 480p"));
+                    assert!(text.contains(if video {
+                        "(*) Audio + video"
+                    } else {
+                        "(*) Audio only"
+                    }));
+                    assert!(text.contains("Time range: Off"));
                     assert!(text.contains("Esc cancel"));
                 }
                 app.key(
@@ -6431,6 +6447,133 @@ mod tests {
                 }
                 assert!(requests.try_recv().is_err());
                 assert!(app.import_ui.modal.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn download_range_fields_validate_keep_focus_and_fit_small_terminals() {
+        use ratatui::backend::TestBackend;
+        let mut app = app();
+        app.import_ui.enabled = true;
+        app.input = Some(Input::Folder("https://youtu.be/lO3lG-qXU14".into()));
+        let (commands, mut requests) = mpsc::channel(8);
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        app.key(key(KeyCode::Tab), &commands).unwrap();
+        app.key(key(KeyCode::Tab), &commands).unwrap();
+        app.key(key(KeyCode::Char(' ')), &commands).unwrap();
+        app.key(key(KeyCode::Tab), &commands).unwrap();
+        for c in "1:23".chars() {
+            app.key(key(KeyCode::Char(c)), &commands).unwrap();
+        }
+        app.key(key(KeyCode::Tab), &commands).unwrap();
+        for c in "1:00".chars() {
+            app.key(key(KeyCode::Char(c)), &commands).unwrap();
+        }
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        assert!(requests.try_recv().is_err());
+        for (width, height) in [(40, 12), (71, 13), (72, 24), (100, 30)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            for label in [
+                "Audio only",
+                "Audio + video · up to 480p",
+                "Time range: On",
+                "Start: 1:23",
+                "End: 1:00",
+                "End must be after start",
+                "Esc cancel",
+            ] {
+                assert!(text.contains(label), "{width}x{height}: {label}");
+            }
+            let caret = app.caret.expect("range field must expose a terminal caret");
+            assert!(caret.x < width && caret.y < height);
+        }
+        app.key(
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            &commands,
+        )
+        .unwrap();
+        for c in "2:45".chars() {
+            app.key(key(KeyCode::Char(c)), &commands).unwrap();
+        }
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        let Command::ImportStart { request } = requests.try_recv().unwrap() else {
+            panic!("expected import");
+        };
+        assert_eq!(
+            request.range,
+            crate::youtube::TimeRange::from_text("83", "165").unwrap()
+        );
+        assert!(request.video);
+
+        // Collapsing ignores drafts; a new import never remembers consent or range.
+        app.input = Some(Input::Folder("https://youtu.be/lO3lG-qXU14".into()));
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        let Some(imports::Modal::Download { request, options }) = app.import_ui.modal.as_mut()
+        else {
+            panic!("expected options");
+        };
+        assert!(!options.range_enabled);
+        assert!(options.start.is_empty());
+        assert!(!request.video);
+        options.range_enabled = true;
+        options.start = "bad draft".into();
+        options.field = 2;
+        app.key(key(KeyCode::Left), &commands).unwrap();
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        let Command::ImportStart { request } = requests.try_recv().unwrap() else {
+            panic!("expected import");
+        };
+        assert_eq!(request.range, None);
+    }
+
+    #[test]
+    fn imports_show_copy_progress_instead_of_network_speed() {
+        let mut app = app();
+        app.import_ui.enabled = true;
+        app.import_ui.modal = Some(imports::Modal::Jobs);
+        let mut job = crate::imports::ImportJob::new(&Default::default());
+        job.title = "Example clip".into();
+        job.status = "running".into();
+        job.stage = "processing_video".into();
+        job.progress = crate::youtube::DownloadProgress {
+            processed_ms: Some(84_000),
+            processing_total_ms: Some(219_000),
+            processing_speed: Some(1.5),
+            eta: Some(90.0),
+            ..Default::default()
+        };
+        assert!(job.summary().contains("Copied 1:24 / 3:39 · 38%"));
+        assert!(!job.summary().contains("MiB/s"));
+        app.import_ui.jobs = vec![job];
+        for (width, height) in [(40, 12), (80, 24)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            assert!(text.contains("Copying video"), "{width}x{height}: {text}");
+            assert!(
+                text.contains("Copied 1:24 / 3:39 · 38%"),
+                "{width}x{height}: {text}"
+            );
+            if width == 80 {
+                assert!(text.contains("ETA 90s"), "{text}");
+                assert!(!text.contains("MiB/s"));
             }
         }
     }

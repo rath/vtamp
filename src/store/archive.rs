@@ -19,8 +19,8 @@ impl Store {
         )?;
         let version: u32 = snapshot.pragma_query_value(None, "user_version", |r| r.get(0))?;
         anyhow::ensure!(
-            matches!(version, 6..=8),
-            "Library archive requires database version 6 to 8"
+            matches!(version, 6..=9),
+            "Library archive requires database version 6 to 9"
         );
         Self { db: snapshot }.archive_catalog()
     }
@@ -93,13 +93,14 @@ impl Store {
                     artist_override: saved.artist.clone(),
                 });
             tx.execute(
-                "INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,album_override) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                "INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,album_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
                 params![
                     record.track.id,
                     record.track.source.as_ref().map(|s| &s.video_id),
                     manifest.map(|m| serde_json::to_string(&m)).transpose()?,
                     serde_json::to_string(&saved.automatic)?,
                     saved.title, saved.artist, saved.album,
+                    record.track.source.as_ref().map(|s| s.key()),
                 ],
             )?;
             imports::write_record(&tx, record)?;
