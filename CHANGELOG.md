@@ -11,12 +11,25 @@
 - Tracks carry `video: true` when their saved video sidecar exists, and Library
   and Queue rows show a `· VIDEO` suffix like the existing `· LIVE`. Scans,
   video publication, and archive restores keep the flag current.
+- YouTube time ranges: single-video imports take Start/End fields in the TUI
+  download options and `library add --start/--end` in the CLI (whole seconds,
+  `M:SS`, or `H:MM:SS`). Excerpts and full downloads coexist as separate tracks,
+  Library, Queue, and import history show the range, and retries, video
+  upgrades, deletion, and archives keep it.
+- Range downloads copy video packets without re-encoding, so the source codec
+  is kept and boundaries fall on nearby source keyframes rather than exact
+  frames. Imports show FFmpeg's progress while copying: media time copied,
+  percentage, processing speed, and estimated time remaining.
 
 ### Changed
 
-- Protocol 12 and database version 8: the catalog stores a `kind` column,
-  backfilled from existing sidecars in the catalog and the saved queue. Restart
-  the server after upgrading; older binaries reject the new database.
+- Protocol 13 and database version 9: the catalog stores a `kind` column,
+  backfilled from existing sidecars in the catalog and the saved queue, and
+  imports are identified by video ID plus normalized range instead of video ID
+  alone. Track IDs, metadata, queue, and sessions are preserved. Restart the
+  server after upgrading; older binaries reject the new database.
+- Archives are written as format 2, which carries source ranges. Format 1
+  archives still restore; older binaries reject format 2.
 - Video fullscreen continues into the next track when it also has a saved
   video, including natural endings where the video stops just before its audio.
 
