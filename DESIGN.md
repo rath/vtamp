@@ -331,9 +331,11 @@ pause/resume action, and seek/volume hints when they fit. Reserve the right end
 for elapsed / total time (`01:44 / 04:32`), dropping optional hints before time
 at narrow widths. Hide the lists and spectrum in fullscreen; suspend spectrum
 work. `F`/`Esc` returns without changing filters. Playback keys stay active;
-browsing and dialogs return to the normal layout. Track changes, stop, video
-failure/end, and disconnect also leave this
-attachment-only mode. Never zoom tmux or alter the OS window.
+browsing and dialogs return to the normal layout. A track change into another
+saved video keeps fullscreen, waiting with a blank picture until its first frame;
+a video end within five seconds of the audio end holds fullscreen for that
+change. Changes to tracks without video, stop, video failure, an earlier video
+end, and disconnect leave this attachment-only mode. Never zoom tmux or alter the OS window.
 Layout transitions clear and redraw without querying the terminal cursor;
 delayed terminal replies must not detach the client on a track change.
 Kitty scales the bounded source pixels in the terminal and uses compression only

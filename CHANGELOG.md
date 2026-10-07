@@ -17,6 +17,8 @@
 - Protocol 12 and database version 8: the catalog stores a `kind` column,
   backfilled from existing sidecars in the catalog and the saved queue. Restart
   the server after upgrading; older binaries reject the new database.
+- Video fullscreen continues into the next track when it also has a saved
+  video, including natural endings where the video stops just before its audio.
 
 ## [0.5.0] — 2026-10-06
 

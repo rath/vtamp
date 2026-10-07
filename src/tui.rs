@@ -57,6 +57,10 @@ const QUEUE_LIMIT: usize = 10_000;
 /// asks the server, so a fast typist starts one search instead of one per key.
 /// The queue filter is local and applies at once.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Saved video can end slightly before its audio (stream-copied excerpts end
+/// near a source keyframe). An end this close to the track's end keeps
+/// fullscreen so the next video opens there instead of in the normal layout.
+const FULLSCREEN_END_GRACE_MS: u64 = 5_000;
 
 const HELP_TEXT: &str = "ATTACH / DETACH\nq / Esc / Ctrl+C   Close this interface. Music keeps playing.\n\nPLAYBACK\nSpace   Play / pause       n/> / b/<   Next / previous\n← / →   Seek 10 seconds    + / -   Volume    s Shuffle   r Cycle repeat\n\nLIBRARY & QUEUE\nTab     Switch panels     j / k   Move selection\ngg / G  First / last      Ctrl-F / Ctrl-B  Page down / up (10)\n/       Search / filter   a       Add folder / stream / playlist\nf       Library kind: all / video / radio\nzz      Jump to now playing   A       Queue all matching\nEsc     Clear filter      Ctrl-U  Clear typed text\nR       Rescan folders    [ / ]   Library pages\nEnter Play selection   Ctrl-Enter Play without queue\ne Enqueue   x/d Remove/delete   J/K Move queue   X Empty queue\n\nv / V   Toggle spectrum / style   t Theme   : Extensions\n\nStop the server explicitly with: vtamp server stop";
 
@@ -1071,16 +1075,19 @@ impl App {
 
     fn sync_video(&mut self) {
         let _span = diagnostics::span("video.sync", || serde_json::json!({}));
-        if !self.video.enabled
-            || self.video.ended
-            || !self.connected
-            || self.state.status == PlaybackStatus::Stopped
-            || self
-                .video_fullscreen
-                .as_deref()
-                .is_some_and(|id| self.state.current().is_none_or(|item| item.id != id))
-        {
-            self.video_fullscreen = None;
+        if let Some(id) = &self.video_fullscreen {
+            // Fullscreen follows natural and manual track changes into the next
+            // saved video; any other entry returns to the normal layout.
+            self.video_fullscreen = self
+                .state
+                .current()
+                .filter(|item| item.id == *id || item.track.video)
+                .filter(|_| {
+                    self.video.enabled
+                        && self.connected
+                        && self.state.status != PlaybackStatus::Stopped
+                })
+                .map(|item| item.id.clone());
         }
         self.video.sync(
             self.state.current(),
@@ -1093,6 +1100,15 @@ impl App {
             self.position(),
             cover_background(self.theme.palette()),
         );
+        // A video ending just before its audio keeps fullscreen through the
+        // track change; an earlier end, failure, or missing sidecar leaves it.
+        let duration = self.state.current().and_then(|item| item.track.duration_ms);
+        let ending = self.video.ended
+            && duration
+                .is_some_and(|d| self.position().saturating_add(FULLSCREEN_END_GRACE_MS) >= d);
+        if !self.video.reserves_area() && !ending {
+            self.video_fullscreen = None;
+        }
     }
 
     fn cover_hidden(&self) -> bool {
@@ -6055,6 +6071,63 @@ mod tests {
         assert!(app.video_fullscreen.is_none());
         app.video = video::View::default();
         press(&mut app, KeyCode::Char('F'));
+        assert!(app.video_fullscreen.is_none());
+    }
+
+    #[test]
+    fn fullscreen_follows_track_changes_into_saved_video() {
+        let mut app = youtube_app(PlaybackStatus::Paused);
+        let mut first = app.tracks[0].clone();
+        first.video = true;
+        let mut second = first.clone();
+        second.id = "second".into();
+        let mut audio = first.clone();
+        audio.id = "audio".into();
+        audio.video = false;
+        app.state.queue = [first, second, audio]
+            .into_iter()
+            .map(QueueItem::new)
+            .collect();
+        let ids: Vec<_> = app.state.queue.iter().map(|item| item.id.clone()).collect();
+        app.state.current_id = Some(ids[0].clone());
+        app.video = video::View::with_test_frame();
+        let (commands, _requests) = mpsc::channel(16);
+        app.key(
+            KeyEvent::new(KeyCode::Char('F'), KeyModifiers::NONE),
+            &commands,
+        )
+        .unwrap();
+        assert_eq!(app.video_fullscreen.as_ref(), Some(&ids[0]));
+
+        // The video ends just before its audio, then the next video starts.
+        app.video = video::View::default();
+        app.video.ended = true;
+        app.state.position_ms = 178_000;
+        app.sync_video();
+        assert_eq!(app.video_fullscreen.as_ref(), Some(&ids[0]));
+        app.state.current_id = Some(ids[1].clone());
+        app.state.position_ms = 0;
+        app.video = video::View::with_test_waiting();
+        app.sync_video();
+        assert_eq!(app.video_fullscreen.as_ref(), Some(&ids[1]));
+
+        // An end well before the audio ends still returns to the normal layout.
+        app.video = video::View::default();
+        app.video.ended = true;
+        app.state.position_ms = 60_000;
+        app.sync_video();
+        assert!(app.video_fullscreen.is_none());
+
+        // Audio-only tracks and stopping leave fullscreen.
+        app.video = video::View::with_test_frame();
+        app.video_fullscreen = Some(ids[1].clone());
+        app.state.current_id = Some(ids[2].clone());
+        app.sync_video();
+        assert!(app.video_fullscreen.is_none());
+        app.state.current_id = Some(ids[1].clone());
+        app.video_fullscreen = Some(ids[1].clone());
+        app.state.status = PlaybackStatus::Stopped;
+        app.sync_video();
         assert!(app.video_fullscreen.is_none());
     }
 

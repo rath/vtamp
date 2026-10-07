@@ -273,9 +273,13 @@ Press uppercase `F` while video is visible to fill the current terminal pane,
 preserving the picture's aspect ratio with a one-line control hint. `F` or `Esc`
 returns to the normal layout without clearing search filters or detaching.
 Space, seek, volume, shuffle/repeat, and next/previous still work. Browsing or
-opening a dialog returns to the normal layout; changing tracks, stopping, or
-losing the server connection also leaves fullscreen. Fullscreen is not saved
-between attachments and never zooms tmux or changes the OS window.
+opening a dialog returns to the normal layout. When the next track also has a
+saved video, fullscreen continues with it, whether the track ended naturally or
+you pressed next/previous; a video that ends within five seconds of its audio
+keeps fullscreen until that change. Changing to a track without video, an
+earlier video end, stopping, or losing the server connection leaves fullscreen.
+Fullscreen is not saved between attachments and never zooms tmux or changes the
+OS window.
 
 The server remains the sole audio player. Each TUI decodes its locally accessible
 managed sidecar with installed FFmpeg and follows the server's playback position.
