@@ -608,18 +608,22 @@ impl App {
         commands: &mpsc::Sender<Command>,
         open: impl FnOnce(&str) -> std::io::Result<()>,
     ) {
-        let url = self
-            .selected_track()
-            .and_then(|t| t.source.as_ref())
-            .and_then(|s| {
-                if channel {
-                    s.channel_url.clone()
-                } else {
-                    Some(crate::youtube::video_url(&s.video_id))
-                }
-            });
+        let Some(track) = self.selected_track() else {
+            self.notice("Select a track in Library or Queue to open its YouTube link.");
+            return;
+        };
+        let url = track.source.as_ref().and_then(|s| {
+            if channel {
+                s.channel_url.clone()
+            } else {
+                Some(crate::youtube::video_url(&s.video_id))
+            }
+        });
         let Some(url) = url else {
-            self.notice("This track has no YouTube source link.");
+            self.notice(format!(
+                "Selected track ({}) has no YouTube source link.",
+                track.title
+            ));
             return;
         };
         if !(url.starts_with("https://www.youtube.com/watch?v=")
