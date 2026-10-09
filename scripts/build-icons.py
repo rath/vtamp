@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Derive web, macOS, and iOS icons from the approved V-meter artwork (macOS tools)."""
+"""Derive web and macOS icons from the approved V-meter artwork and draw the iPhone icon (macOS tools)."""
 from pathlib import Path
+import math
 import struct
 import subprocess
 import tempfile
@@ -26,11 +27,104 @@ def resize(size, destination):
                     "--out", str(destination)], check=True, capture_output=True)
 
 
-# The opaque tile inside the macOS artwork's transparent margin, inset past its
-# rim. iOS masks the square with a larger corner radius than the tile's, so
-# the filled corners never show.
-IOS_TILE = {"top": 98, "left": 103, "side": 1047}
-IOS_FILL = (24, 30, 26)
+# The iPhone icon redraws the V-meter for the home screen: one graphite plate
+# holding the five lit bars, centred on warm white with margins. Each bar's left
+# edge, right edge, and top are traced from the approved artwork in a 1024 frame;
+# one 45-degree V cuts every bar so the plate has a single straight lower edge.
+IOS_BARS = [(91, 240, 127), (262, 412, 330), (440, 584, 465), (613, 763, 330), (785, 935, 127)]
+IOS_AXIS = 513  # the V's vertical axis in the traced frame
+IOS_CUT = 430  # bar bottoms: y = x + IOS_CUT left of the axis, mirrored right
+IOS_PLATE = 30  # graphite around the bars, in the traced frame
+IOS_SCALE = 0.66  # the traced frame shrinks around IOS_ORIGIN,
+IOS_ORIGIN = (513, 526)  # which lands on the icon's centre
+IOS_PAPER = (252, 251, 247)
+
+
+def offset(points, distance):
+    """Move each edge of a clockwise polygon inward by `distance` (outward when negative)."""
+    lines = []
+    for (ax, ay), (bx, by) in zip(points, points[1:] + points[:1]):
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        lines.append(((ax - dy / length * distance, ay + dx / length * distance), (dx, dy)))
+    corners = []
+    for (p, r), (q, s) in zip(lines[-1:] + lines[:-1], lines):
+        t = ((q[0] - p[0]) * s[1] - (q[1] - p[1]) * s[0]) / (r[0] * s[1] - r[1] * s[0])
+        corners.append((p[0] + r[0] * t, p[1] + r[1] * t))
+    return corners
+
+
+def ios_bar(index, grow=0):
+    """Bar `index` cut by the V, grown outward by `grow` (shrunk when negative)."""
+    left, right, top = IOS_BARS[index]
+    left, right, top = left - grow, right + grow, top - grow
+
+    def bottom(x):
+        return IOS_CUT + min(x, 2 * IOS_AXIS - x) + grow * math.sqrt(2)
+
+    corners = [(left, top), (right, top), (right, bottom(right))]
+    if left < IOS_AXIS < right:
+        corners.append((IOS_AXIS, bottom(IOS_AXIS)))
+    return corners + [(left, bottom(left))]
+
+
+def ios_plate():
+    """The plate's outline: stepped along the bar tops, one V underneath."""
+    tops = [top - IOS_PLATE for _, _, top in IOS_BARS]
+    outline = [(IOS_BARS[0][0] - IOS_PLATE, tops[0])]
+    for index in range(len(IOS_BARS) - 1):
+        step = (IOS_BARS[index][1] + IOS_BARS[index + 1][0]) / 2
+        outline += [(step, tops[index]), (step, tops[index + 1])]
+    outline.append((IOS_BARS[-1][1] + IOS_PLATE, tops[-1]))
+    right, middle, left = (ios_bar(index, IOS_PLATE) for index in (4, 2, 0))
+    return outline + [right[2], middle[3], left[3]]
+
+
+def placed(points):
+    ox, oy = IOS_ORIGIN
+    return [(512 + (x - ox) * IOS_SCALE, 512 + (y - oy) * IOS_SCALE) for x, y in points]
+
+
+def rounded(points, radius, paint, attributes=""):
+    # A round-joined stroke around the polygon inset by `radius` rounds every
+    # convex corner by `radius` and leaves the concave steps sharp.
+    inner = " ".join(f"{x:.2f},{y:.2f}" for x, y in offset(placed(points), radius))
+    return (f'<polygon points="{inner}" fill="{paint}" stroke="{paint}" '
+            f'stroke-width="{2 * radius}" stroke-linejoin="round" {attributes}/>')
+
+
+def ios_icon_svg():
+    def shadow(name, blur, drop):
+        return (f'<filter id="{name}" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">'
+                f'<feGaussianBlur in="SourceAlpha" stdDeviation="{blur}"/><feOffset dy="{drop}" result="shade"/>'
+                '<feFlood flood-color="#171c18" flood-opacity="0.3"/><feComposite in2="shade" operator="in"/>'
+                '</filter>')
+
+    defs = (
+        '<linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0" stop-color="#fcfbf7"/><stop offset="1" stop-color="#ecebe3"/></linearGradient>'
+        '<radialGradient id="sheen" cx="0.5" cy="0.28" r="0.75">'
+        '<stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>'
+        '<stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>'
+        '<linearGradient id="graphite" gradientUnits="userSpaceOnUse" x1="0" y1="170" x2="0" y2="860">'
+        '<stop offset="0" stop-color="#2f362f"/><stop offset="1" stop-color="#121612"/></linearGradient>'
+        '<linearGradient id="phosphor" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0" stop-color="#ecffb0"/><stop offset="0.4" stop-color="#c2f77f"/>'
+        '<stop offset="1" stop-color="#7fbf4a"/></linearGradient>'
+        '<filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">'
+        '<feGaussianBlur stdDeviation="10"/></filter>'
+        + shadow("drop", 18, 22) + shadow("contact", 4, 4))
+    plate = ios_plate()
+    lights = [ios_bar(index, -3) for index in range(len(IOS_BARS))]
+    body = (['<rect width="1024" height="1024" fill="url(#paper)"/>',
+             '<rect width="1024" height="1024" fill="url(#sheen)"/>',
+             rounded(plate, 22, "url(#graphite)", 'filter="url(#drop)"'),
+             rounded(plate, 22, "url(#graphite)", 'filter="url(#contact)"'),
+             rounded(plate, 22, "url(#graphite)")]
+            + [rounded(bar, 9, "#b4f676", 'filter="url(#glow)" opacity="0.8"') for bar in lights]
+            + [rounded(bar, 9, "url(#phosphor)") for bar in lights])
+    return ('<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
+            f'<defs>{defs}</defs>{"".join(body)}</svg>')
 
 
 def png_rows(data):
@@ -83,16 +177,13 @@ def flatten(destination, fill):
 
 
 def ios_icon(destination):
+    # sips renders SVG, filters included, at the drawing's own 1024 size.
     with tempfile.TemporaryDirectory(prefix="vtamp-ios-icon-") as directory:
-        tile = Path(directory) / "tile.png"
-        side = str(IOS_TILE["side"])
-        subprocess.run(["sips", "-c", side, side, "--cropOffset", str(IOS_TILE["top"]),
-                        str(IOS_TILE["left"]), str(SOURCE), "--out", str(tile)],
+        drawing = Path(directory) / "icon.svg"
+        drawing.write_text(ios_icon_svg())
+        subprocess.run(["sips", "-s", "format", "png", str(drawing), "--out", str(destination)],
                        check=True, capture_output=True)
-        subprocess.run(["sips", "-z", "1024", "1024", str(tile), "--out", str(destination)],
-                       check=True, capture_output=True)
-    flatten(destination, IOS_FILL)
-    preserve_prompt(destination)
+    flatten(destination, IOS_PAPER)
 
 
 def main():

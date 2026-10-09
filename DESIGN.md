@@ -157,11 +157,11 @@ immediate, and preserve progress and notice expiry.
 
 Compact square corners and fine panel borders. TUI overlays use solid panel backgrounds, not transparency over album art.
 
-The approved V-meter app icon has five lime bars forming a V silhouette on a charcoal rounded-square tile. Its rounded shape and illuminated finish belong to the identity asset; they do not change the surrounding interface's shapes or palette.
+The approved V-meter app icon has five lime bars forming a V silhouette on a charcoal rounded-square tile. Its rounded shape and illuminated finish belong to the identity asset; they do not change the surrounding interface's shapes or palette. The iPhone app icon is the one variant: the same five lit bars set in a single V-shaped graphite plate, centred on warm white with margins.
 
 ## Components
 
-The V-meter source is `assets/icon.png`. Use derived PNGs for the website header/footer mark (`site/mark.png`), favicons (`site/favicon-32.png`, `site/favicon-64.png`), and touch icon (`site/apple-touch-icon.png`); use `assets/vtamp.icns` for macOS app identity. Preserve the approved artwork across these sizes. The brand icon identifies vtamp and never replaces album covers.
+The V-meter source is `assets/icon.png`. Use derived PNGs for the website header/footer mark (`site/mark.png`), favicons (`site/favicon-32.png`, `site/favicon-64.png`), and touch icon (`site/apple-touch-icon.png`); use `assets/vtamp.icns` for macOS app identity. Preserve the approved artwork across these sizes. `scripts/build-icons.py` draws the iPhone icon (`ios/Sources/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png`) as vector shapes from bar edges traced from that artwork, so its bars keep the artwork's proportions; one straight V cuts all five bars. The brand icon identifies vtamp and never replaces album covers.
 
 The social preview cards `site/og.png` and `site/og-ko.png` (1200 × 630, composed by `scripts/build-og.py`) lay the compact Queue capture across the whole card as a backdrop, tilted 30° counter-clockwise and zoomed to 140% of the card width so the album art lands bottom-left and the queue runs off the right edge. A charcoal scrim fades from nearly opaque at the top to translucent at the bottom, and the copy sits in the top band: mark and wordmark, a two-line headline with “keeps playing” (Korean: “재생이 멈추지 않는”) in phosphor green, and the Homebrew command chip. The English card sets the headline in Space Grotesk, the Korean card in the bundled Pretendard Medium. Rebuild both whenever that capture or a headline changes.
 

@@ -1096,8 +1096,10 @@ and continues with ordinary playback and the available media controls.
 
 The approved icon source is `assets/icon.png`; its generation prompt is in
 `assets/icon-prompt.txt`. Run `python3 scripts/build-icons.py` on macOS to regenerate
-the web PNG sizes and `assets/vtamp.icns`. These generated assets are committed;
-building or installing vtamp does not require image-generation tools.
+the web PNG sizes and `assets/vtamp.icns`. The same script draws the iPhone app
+icon as SVG and renders it with `sips` (checked on macOS 26, whose `sips` draws
+SVG blur filters). These generated assets are committed; building or installing
+vtamp does not require image-generation tools.
 For a visual icon check, use a private `VTAMP_HOME` on the normal filesystem
 (for example a short directory under `target/`): Launch Services may leave
 bundles under `/tmp` with a generic icon even when registration succeeds.
