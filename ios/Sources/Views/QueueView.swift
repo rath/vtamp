@@ -89,6 +89,7 @@ struct QueueView: View {
                                 .accessibilityLabel(player.isPlaying ? "Playing" : "Paused")
                         }
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

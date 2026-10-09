@@ -175,6 +175,23 @@ struct PlayerTests {
         #expect(engine.stops == 1)
     }
 
+    @Test func choosingATrackCountsAsAPlayRequestButTransportDoesNot() {
+        player.play(tracks("a", "b"), startingAt: 0)
+        #expect(player.playRequests == 1)
+        player.next()
+        player.previous()
+        player.pause()
+        player.play()
+        player.playNext(tracks("c")[0])
+        player.enqueue(tracks("d"))
+        #expect(player.playRequests == 1, "next, previous, resume, and queue edits open nothing")
+        player.select(2)
+        player.playNow(tracks("e")[0])
+        #expect(player.playRequests == 3)
+        player.play([Track(id: "radio", path: nil, url: "https://radio", title: "Radio")], startingAt: 0)
+        #expect(player.playRequests == 3, "a track that cannot play is not a request")
+    }
+
     @Test func readyReportsTheFileDuration() {
         player.play([Track(id: "a", path: "/m/a.m4a", title: "A", durationMs: 1000)], startingAt: 0)
         #expect(player.duration == 1)

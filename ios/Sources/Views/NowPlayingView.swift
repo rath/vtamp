@@ -1,9 +1,17 @@
 import SwiftUI
 
+/// Whether the full player is up. `RootView` presents the one sheet over
+/// every tab; the mini player and each play request open it.
+@MainActor
+@Observable
+final class NowPlayingSheet {
+    var isPresented = false
+}
+
 /// The current track above the tab bar; tap for the full player.
 struct MiniPlayer: View {
     @Environment(Player.self) private var player
-    @State private var expanded = false
+    @Environment(NowPlayingSheet.self) private var sheet
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,7 +21,7 @@ struct MiniPlayer: View {
             if let track = player.current {
                 HStack(spacing: 4) {
                     Button {
-                        expanded = true
+                        sheet.isPresented = true
                     } label: {
                         HStack(spacing: 12) {
                             CoverImage(track: track, size: 40)
@@ -55,7 +63,6 @@ struct MiniPlayer: View {
                 .padding(.vertical, 6)
                 .background(.bar)
                 .overlay(alignment: .top) { Divider() }
-                .sheet(isPresented: $expanded) { NowPlayingView().presentationDragIndicator(.visible) }
             }
         }
     }

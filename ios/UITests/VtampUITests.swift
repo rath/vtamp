@@ -21,18 +21,20 @@ final class VtampUITests: XCTestCase {
         app.launchEnvironment["VTAMP_MUTED"] = "1"
         app.launch()
 
-        // Library: a tap plays the list from that track.
+        // Library: a tap plays the list from that track and opens the player.
+        // The tap lands in the blank space between the title and the duration,
+        // which must count as much as the text.
         let tone = row(app, "Tone")
         XCTAssertTrue(tone.waitForExistence(timeout: 15), "The Library lists the server's tracks")
         XCTAssertFalse(row(app, "Test FM").isEnabled, "Radio cannot play on iPhone")
         snapshot(app, "library")
-        tone.tap()
+        gap(tone).tap()
         XCTAssertTrue(app.buttons["Pause"].firstMatch.waitForExistence(timeout: 15), "Playback starts")
+        let position = app.sliders["Position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 5), "The player opens on play")
+        XCTAssertEqual(app.staticTexts["nowPlayingTitle"].label, "Tone")
 
         // The full player shows the position advancing through range requests.
-        app.buttons["Now Playing: Tone"].firstMatch.tap()
-        let position = app.sliders["Position"]
-        XCTAssertTrue(position.waitForExistence(timeout: 5))
         let advanced = expectation(for: NSPredicate { slider, _ in
             guard let value = (slider as? XCUIElement)?.value as? String else { return false }
             return value != "0:00" && value != "0:01"
@@ -49,6 +51,13 @@ final class VtampUITests: XCTestCase {
         let after = try seconds(position)
         XCTAssertGreaterThanOrEqual(after - before, 5, "Position \(before) s before, \(after) s after the background")
         app.buttons["Close"].tap()
+        XCTAssertTrue(position.waitForNonExistence(timeout: 5))
+
+        // The bar above the tabs reopens the player.
+        app.buttons["Now Playing: Tone"].firstMatch.tap()
+        XCTAssertTrue(position.waitForExistence(timeout: 5), "The mini player opens the player")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(position.waitForNonExistence(timeout: 5))
 
         // Queue: the phone's own list, then the server's Queue loaded onto the phone.
         tab(app, "Queue").tap()
@@ -58,8 +67,12 @@ final class VtampUITests: XCTestCase {
         let serverEntry = row(app, "Song")
         XCTAssertTrue(serverEntry.waitForExistence(timeout: 10), "The server's Queue is listed")
         snapshot(app, "queue-server")
-        serverEntry.tap()
-        XCTAssertTrue(app.buttons["Now Playing: Song"].firstMatch.waitForExistence(timeout: 10))
+        gap(serverEntry).tap()
+        XCTAssertTrue(position.waitForExistence(timeout: 10), "The player opens on the server entry")
+        XCTAssertEqual(app.staticTexts["nowPlayingTitle"].label, "Song")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(position.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Now Playing: Song"].firstMatch.waitForExistence(timeout: 5))
 
         // Import: the server runs the download and the Library picks up the track.
         tab(app, "Import").tap()
@@ -104,7 +117,7 @@ final class VtampUITests: XCTestCase {
             clip.press(forDuration: 0.1)
         }
         XCTAssertTrue(pause.waitForExistence(timeout: 15), "Playback starts")
-        app.buttons["Now Playing: \(title)"].firstMatch.tap()
+        // The player opens by itself on play.
         let video = app.descendants(matching: .any)["video"].firstMatch
         XCTAssertTrue(video.waitForExistence(timeout: 20), "The saved video shows in the player")
         let framed = NSPredicate { element, _ in
@@ -161,6 +174,12 @@ final class VtampUITests: XCTestCase {
 
     private func row(_ app: XCUIApplication, _ title: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+    }
+
+    /// A point in the row's blank space, right of the short fixture titles
+    /// and left of the duration.
+    private func gap(_ row: XCUIElement) -> XCUICoordinate {
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
     }
 
     private func tab(_ app: XCUIApplication, _ title: String) -> XCUIElement {

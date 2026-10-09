@@ -15,6 +15,10 @@ final class Player {
     private(set) var duration: TimeInterval?
     /// The last track that could not play, shown briefly.
     var lastError: String?
+    /// How many times a track was chosen to play (a Library or Queue tap, an
+    /// import's Play); the player opens on each. Next, previous, and resume
+    /// do not count.
+    private(set) var playRequests = 0
 
     @ObservationIgnored var onTrackChange: (() -> Void)?
     @ObservationIgnored var onStateChange: (() -> Void)?
@@ -57,6 +61,7 @@ final class Player {
         queue = kept.map(\.element)
         index = kept.firstIndex { $0.offset == start }
         failures = 0
+        playRequests += 1
         loadCurrent(autoplay: true)
     }
 
@@ -71,6 +76,7 @@ final class Player {
             index = queue.count - 1
         }
         failures = 0
+        playRequests += 1
         loadCurrent(autoplay: true)
     }
 
@@ -150,6 +156,7 @@ final class Player {
         guard queue.indices.contains(position) else { return }
         index = position
         failures = 0
+        playRequests += 1
         loadCurrent(autoplay: true)
     }
 

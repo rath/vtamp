@@ -7,11 +7,14 @@ struct RootView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(ImportsModel.self) private var imports
+    @Environment(Player.self) private var player
     @Environment(VideoRenderer.self) private var video
     @Environment(\.scenePhase) private var scenePhase
     @State private var section: Section = .library
+    @State private var sheet = NowPlayingSheet()
 
     var body: some View {
+        @Bindable var sheet = sheet
         TabView(selection: $section) {
             Tab("Library", systemImage: "music.note.list", value: .library) {
                 LibraryView().withPlayerChrome()
@@ -28,6 +31,10 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        .environment(sheet)
+        .sheet(isPresented: $sheet.isPresented) { NowPlayingView().presentationDragIndicator(.visible) }
+        // Choosing a track to play brings up the player from any tab.
+        .onChange(of: player.playRequests) { _, _ in sheet.isPresented = true }
         .task {
             if app.isConfigured {
                 await app.refresh()

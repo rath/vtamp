@@ -29,6 +29,9 @@ struct TrackRow: View {
                 }
             }
         }
+        // A plain button only hit-tests what it draws; the gap between the
+        // titles and the duration must count too.
+        .contentShape(Rectangle())
         .opacity(track.isPlayable ? 1 : 0.5)
         .accessibilityElement(children: .combine)
     }
