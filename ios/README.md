@@ -188,9 +188,9 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 
-The app icon sets the V-meter in a graphite plate on warm white, unlike the
-dark macOS icon. `scripts/build-icons.py` draws it from bar edges traced from
-`assets/icon.png`; change it there and rerun the script.
+The app icon sets the five V-meter bars on dark gray with margins, without
+the macOS icon's tile. `scripts/build-icons.py` draws it from bar edges traced
+from `assets/icon.png`; change it there and rerun the script.
 The app's version (`MARKETING_VERSION` in `project.yml`) is independent of the
 crate's release version; the protocol version in `VtampClient` must match the
 server's.

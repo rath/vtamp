@@ -157,7 +157,7 @@ immediate, and preserve progress and notice expiry.
 
 Compact square corners and fine panel borders. TUI overlays use solid panel backgrounds, not transparency over album art.
 
-The approved V-meter app icon has five lime bars forming a V silhouette on a charcoal rounded-square tile. Its rounded shape and illuminated finish belong to the identity asset; they do not change the surrounding interface's shapes or palette. The iPhone app icon is the one variant: the same five lit bars set in a single V-shaped graphite plate, centred on warm white with margins.
+The approved V-meter app icon has five lime bars forming a V silhouette on a charcoal rounded-square tile. Its rounded shape and illuminated finish belong to the identity asset; they do not change the surrounding interface's shapes or palette. The iPhone app icon is the one variant: the same five lit bars without the tile, centred on dark gray (#282828) with margins.
 
 ## Components
 
