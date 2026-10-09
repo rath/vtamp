@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+/// What happens at the end of a track: nothing, the queue again, or the same
+/// track again. The TUI's `r` cycles the same three.
+enum RepeatMode: String, CaseIterable, Sendable {
+    case off, all, one
+
+    var next: RepeatMode {
+        switch self {
+        case .off: .all
+        case .all: .one
+        case .one: .off
+        }
+    }
+}
+
 /// The phone's own queue and transport. It plays files from the server but
 /// never changes the server's playback or Queue.
 @MainActor
@@ -8,6 +22,26 @@ import Observation
 final class Player {
     private(set) var queue: [Track] = []
     private(set) var index: Int?
+    /// The track that follows: the next in order, or the shuffle's pick.
+    /// Nothing when the queue ends and does not repeat.
+    private(set) var nextIndex: Int?
+    /// Play the queue in a random order, every entry once per pass; the
+    /// visible order stays. Kept across launches, like the TUI's `s`.
+    var shuffle: Bool {
+        didSet {
+            defaults.set(shuffle, forKey: "shuffle")
+            played = index.map { [$0] } ?? []
+            history = []
+            plan()
+        }
+    }
+    /// Kept across launches, like the TUI's `r`.
+    var repeatMode: RepeatMode {
+        didSet {
+            defaults.set(repeatMode.rawValue, forKey: "repeat")
+            plan()
+        }
+    }
     /// Playback is requested (it may still be waiting for data).
     private(set) var isPlaying = false
     private(set) var isBuffering = false
@@ -25,23 +59,41 @@ final class Player {
     /// Follows the audio with the track's saved video, when there is one.
     @ObservationIgnored var video: (any VideoSink)?
 
+    /// Picks a shuffle candidate: a position below the count. Tests make it deterministic.
+    @ObservationIgnored var pick: (Int) -> Int = { Int.random(in: 0..<$0) }
+
     @ObservationIgnored private let engine: any PlaybackEngine
     @ObservationIgnored private let resolve: (Track) -> URL?
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var loadedID: String?
     @ObservationIgnored private var failures = 0
+    /// Queue positions played in the current shuffle pass, the current one included.
+    @ObservationIgnored private var played: Set<Int> = []
+    /// Positions left behind by shuffle, for Previous.
+    @ObservationIgnored private var history: [Int] = []
 
-    init(engine: any PlaybackEngine, resolve: @escaping (Track) -> URL?) {
+    init(engine: any PlaybackEngine, defaults: UserDefaults = .standard, resolve: @escaping (Track) -> URL?) {
         self.engine = engine
+        self.defaults = defaults
         self.resolve = resolve
+        shuffle = defaults.bool(forKey: "shuffle")
+        repeatMode = RepeatMode(rawValue: defaults.string(forKey: "repeat") ?? "") ?? .off
         engine.onEvent = { [weak self] event in self?.handle(event) }
     }
 
     var current: Track? { index.map { queue[$0] } }
 
+    /// The queue after the current track, in the shown order.
     var upcoming: [Track] {
         guard let index else { return queue }
         return Array(queue[(index + 1)...])
     }
+
+    var nextTrack: Track? { nextIndex.map { queue[$0] } }
+
+    var hasNext: Bool { nextIndex != nil }
+
+    func cycleRepeat() { repeatMode = repeatMode.next }
 
     var isMuted: Bool {
         get { engine.isMuted }
@@ -61,6 +113,8 @@ final class Player {
         queue = kept.map(\.element)
         index = kept.firstIndex { $0.offset == start }
         failures = 0
+        played = []
+        history = []
         playRequests += 1
         loadCurrent(autoplay: true)
     }
@@ -69,7 +123,8 @@ final class Player {
     func playNow(_ track: Track) {
         guard accept(track) else { return }
         if let index {
-            queue.insert(track, at: index + 1)
+            insert(track, at: index + 1)
+            history.append(index)
             self.index = index + 1
         } else {
             queue.append(track)
@@ -82,8 +137,8 @@ final class Player {
 
     func playNext(_ track: Track) {
         guard accept(track) else { return }
-        queue.insert(track, at: index.map { $0 + 1 } ?? queue.count)
-        prefetchNext()
+        insert(track, at: index.map { $0 + 1 } ?? queue.count)
+        plan()
     }
 
     func enqueue(_ tracks: [Track]) {
@@ -94,7 +149,7 @@ final class Player {
                 : "Skipped \(tracks.count - playable.count) tracks that cannot play on iPhone"
         }
         queue.append(contentsOf: playable)
-        prefetchNext()
+        plan()
     }
 
     func remove(atOffsets offsets: IndexSet) {
@@ -107,6 +162,11 @@ final class Player {
         for offset in offsets.reversed() where queue.indices.contains(offset) {
             queue.remove(at: offset)
         }
+        let shifted = { (position: Int) -> Int? in
+            offsets.contains(position) ? nil : position - offsets.count(in: 0..<position)
+        }
+        played = Set(played.compactMap(shifted))
+        history = history.compactMap(shifted)
         if queue.isEmpty {
             clear()
         } else if removedCurrent, let index {
@@ -118,7 +178,7 @@ final class Player {
                 loadCurrent(autoplay: false)
             }
         } else {
-            prefetchNext()
+            plan()
         }
     }
 
@@ -136,7 +196,16 @@ final class Player {
         if let index {
             self.index = positions.firstIndex(of: index)
         }
-        prefetchNext()
+        played = Set(played.compactMap { positions.firstIndex(of: $0) })
+        history = history.compactMap { positions.firstIndex(of: $0) }
+        plan()
+    }
+
+    /// Insert and keep the shuffle bookkeeping pointing at the same entries.
+    private func insert(_ track: Track, at position: Int) {
+        queue.insert(track, at: position)
+        played = Set(played.map { $0 >= position ? $0 + 1 : $0 })
+        history = history.map { $0 >= position ? $0 + 1 : $0 }
     }
 
     func clear() {
@@ -154,6 +223,7 @@ final class Player {
 
     func select(_ position: Int) {
         guard queue.indices.contains(position) else { return }
+        if let index { history.append(index) }
         index = position
         failures = 0
         playRequests += 1
@@ -180,21 +250,27 @@ final class Player {
 
     func next() {
         guard let index else { return }
-        if index + 1 < queue.count {
-            self.index = index + 1
-            loadCurrent(autoplay: true)
-        } else {
+        guard let target = nextIndex else {
             finish()
+            return
         }
+        // A pass that covered every entry starts over.
+        if shuffle, played.count >= queue.count { played = [] }
+        history.append(index)
+        self.index = target
+        loadCurrent(autoplay: true)
     }
 
-    /// Restart the track after three seconds or on the first track, else go back.
+    /// Restart the track after three seconds or with nothing before it, else
+    /// go back: through the shuffle's own trail, or one position up.
     func previous() {
         guard let index else { return }
-        if position > 3 || index == 0 {
+        let back = shuffle ? history.last : (index > 0 ? index - 1 : nil)
+        if position > 3 || back == nil {
             seek(to: 0)
-        } else {
-            self.index = index - 1
+        } else if let back {
+            if shuffle { history.removeLast() }
+            self.index = back
             loadCurrent(autoplay: true)
         }
     }
@@ -224,21 +300,37 @@ final class Player {
         position = 0
         duration = track.duration
         isBuffering = autoplay
+        if let index { played.insert(index) }
         video?.trackChanged(track)
         engine.load(url, mimeType: track.mimeType)
         if autoplay {
             engine.play()
         }
-        prefetchNext()
+        plan()
         onTrackChange?()
     }
 
-    private func prefetchNext() {
-        guard let index, index + 1 < queue.count else { return }
-        let next = queue[index + 1]
+    /// Decide what follows the current track and fetch its start.
+    private func plan() {
+        nextIndex = follower()
+        guard let nextIndex else { return }
+        let next = queue[nextIndex]
         if let url = resolve(next) {
             engine.prefetch(url, mimeType: next.mimeType)
         }
+    }
+
+    private func follower() -> Int? {
+        guard let index, !queue.isEmpty else { return nil }
+        guard shuffle else {
+            if index + 1 < queue.count { return index + 1 }
+            return repeatMode == .all ? 0 : nil
+        }
+        let unplayed = queue.indices.filter { !played.contains($0) && $0 != index }
+        if !unplayed.isEmpty { return unplayed[pick(unplayed.count)] }
+        guard repeatMode == .all else { return nil }
+        let others = queue.indices.filter { $0 != index }
+        return others.isEmpty ? index : others[pick(others.count)]
     }
 
     /// The end of the queue: stay on the last track, paused at its start.
@@ -267,12 +359,17 @@ final class Player {
             isBuffering = buffering
             if changed { onStateChange?() }
         case .ended:
-            next()
+            if repeatMode == .one {
+                seek(to: 0)
+                engine.play()
+            } else {
+                next()
+            }
         case let .failed(message):
             let title = current?.title ?? "Track"
             lastError = "\(title): \(message)"
             failures += 1
-            if failures < queue.count, let index, index + 1 < queue.count {
+            if failures < queue.count, hasNext {
                 next()
             } else {
                 engine.pause()

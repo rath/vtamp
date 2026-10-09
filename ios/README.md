@@ -31,12 +31,15 @@ such as `music-box.tailnet.ts.net:8700` work too.
 | Library | Search by title, artist, or album and filter by kind, 200 tracks per page. Tapping a track plays it now, after the current track, keeping the rest of the queue, and opens the player; swipe or long-press for **Play Next** and **Add to Queue**. |
 | Queue | **This iPhone**: the phone's queue, with reordering, deletion, and Clear. **Server**: the server's Queue and what it is playing, read-only; tapping an entry plays the server's Queue from there on the phone. |
 | Import | A YouTube URL, an optional Start and End (seconds, `M:SS`, or `H:MM:SS`), and the whole playlist when the URL names one. The server runs yt-dlp; progress, Cancel, Retry, and Play for finished jobs follow. Shown only when the server has yt-dlp. |
-| Settings | The server address and what the server reports about itself. The address is the only thing the app saves. |
+| Settings | The server address and what the server reports about itself. Besides the address, the app saves only the Cover / Video choice and the shuffle and repeat settings. |
 
 Choosing a track to play, or tapping the bar above the tabs, opens the
 player: the cover (or the saved video) over the cover's blurred colors, the
 title, the position slider, previous, play or pause, and next, the output
-volume, and an AirPlay button.
+volume, and shuffle and repeat either side of an AirPlay button. Shuffle plays
+every entry of the phone's queue once per pass in a random order while the
+Queue tab keeps the shown order; repeat cycles off, all, one, and repeat-one
+applies to natural endings only, as in the TUI. Both are kept across launches.
 Playback continues in the background with lock-screen and Control Center
 controls, headphone buttons, and artwork. Unplugging headphones pauses, and a
 phone call pauses and resumes. Audio is fetched with HTTP range requests, so
@@ -62,8 +65,8 @@ downloads, and the audio is never affected by a video that cannot be shown.
 Outside the full-screen video the app stays in portrait.
 
 Not on the iPhone: radio channels and Ogg Vorbis files (they appear greyed
-out), the server's loudness normalization, shuffle and repeat, and controlling
-the server's own playback. Nothing is downloaded for offline use.
+out), the server's loudness normalization, and controlling the server's own
+playback. Nothing is downloaded for offline use.
 
 ### VP9 with libvpx
 

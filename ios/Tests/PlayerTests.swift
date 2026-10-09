@@ -36,13 +36,22 @@ final class FakeVideoSink: VideoSink {
     func stopped() { events.append("stopped") }
 }
 
+/// A throwaway UserDefaults suite, so shuffle and repeat never leak between tests.
+func freshDefaults() -> UserDefaults {
+    let name = "vtamp.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: name)!
+    defaults.removePersistentDomain(forName: name)
+    return defaults
+}
+
 @MainActor
 struct PlayerTests {
     let engine = FakeEngine()
+    let defaults = freshDefaults()
     let player: Player
 
     init() {
-        player = Player(engine: engine) { track in
+        player = Player(engine: engine, defaults: defaults) { track in
             URL(string: "http://server/api/library/\(track.id)/audio")
         }
     }
@@ -192,6 +201,80 @@ struct PlayerTests {
         #expect(player.playRequests == 3, "a track that cannot play is not a request")
     }
 
+    @Test func shufflePlaysEveryTrackOnceInItsOwnOrderAndThenStops() {
+        player.play(tracks("a", "b", "c", "d"), startingAt: 0)
+        player.pick = { $0 - 1 }  // the last candidate; turning shuffle on plans at once
+        player.shuffle = true
+        var heard = [player.current!.id]
+        while player.hasNext {
+            player.next()
+            heard.append(player.current!.id)
+        }
+        #expect(heard == ["a", "d", "c", "b"], "every entry once, not in the shown order")
+        #expect(ids == ["a", "b", "c", "d"], "the shown order stays")
+        let pauses = engine.pauses
+        player.next()
+        #expect(player.current?.id == "b" && engine.pauses == pauses + 1 && player.position == 0, "the pass ends paused at the start")
+        player.previous()
+        #expect(player.current?.id == "c", "Previous follows the shuffle's trail")
+        player.previous()
+        #expect(player.current?.id == "d")
+    }
+
+    @Test func shuffleWithRepeatAllStartsANewPass() {
+        player.play(tracks("a", "b"), startingAt: 0)
+        player.shuffle = true
+        player.repeatMode = .all
+        player.next()
+        #expect(player.current?.id == "b")
+        #expect(player.hasNext)
+        player.next()
+        #expect(player.current?.id == "a")
+        player.next()
+        #expect(player.current?.id == "b")
+    }
+
+    @Test func shuffleSurvivesQueueEdits() {
+        player.play(tracks("a", "b", "c"), startingAt: 0)
+        player.pick = { _ in 0 }
+        player.shuffle = true
+        player.next()
+        #expect(player.current?.id == "b")
+        player.playNext(tracks("n")[0])
+        player.enqueue(tracks("z"))
+        player.move(fromOffsets: [0], toOffset: 5)
+        #expect(ids == ["b", "n", "c", "z", "a"])
+        var heard: [String] = []
+        while player.hasNext {
+            player.next()
+            heard.append(player.current!.id)
+        }
+        #expect(heard.sorted() == ["c", "n", "z"], "a and b were already played")
+    }
+
+    @Test func repeatAllWrapsTheQueueAndRepeatOneRestartsNaturalEndsOnly() {
+        player.play(tracks("a", "b"), startingAt: 1)
+        #expect(!player.hasNext)
+        player.repeatMode = .all
+        #expect(player.hasNext)
+        player.next()
+        #expect(player.current?.id == "a")
+        player.repeatMode = .one
+        let plays = engine.plays
+        engine.emit(.ended)
+        #expect(player.current?.id == "a" && engine.seeks.last == 0 && engine.plays == plays + 1, "the same track again")
+        player.next()
+        #expect(player.current?.id == "b", "a manual skip still advances")
+    }
+
+    @Test func shuffleAndRepeatAreKeptAcrossLaunches() {
+        player.shuffle = true
+        player.repeatMode = .one
+        let again = Player(engine: FakeEngine(), defaults: defaults) { _ in nil }
+        #expect(again.shuffle && again.repeatMode == .one)
+        #expect(RepeatMode.off.next == .all && RepeatMode.all.next == .one && RepeatMode.one.next == .off)
+    }
+
     @Test func readyReportsTheFileDuration() {
         player.play([Track(id: "a", path: "/m/a.m4a", title: "A", durationMs: 1000)], startingAt: 0)
         #expect(player.duration == 1)
@@ -204,7 +287,7 @@ struct PlayerTests {
 struct PlayerVideoTests {
     @Test func tellsTheVideoSinkAboutTracksReadinessSeeksAndStops() {
         let engine = FakeEngine()
-        let player = Player(engine: engine) { track in
+        let player = Player(engine: engine, defaults: freshDefaults()) { track in
             URL(string: "http://server/api/library/\(track.id)/audio")
         }
         let sink = FakeVideoSink()

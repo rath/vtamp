@@ -56,7 +56,7 @@ struct MiniPlayer: View {
                             .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Next")
-                    .disabled(player.upcoming.isEmpty)
+                    .disabled(!player.hasNext)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 12)
@@ -105,9 +105,7 @@ struct NowPlayingView: View {
                 Timeline()
                 TransportControls()
                 volume
-                RoutePicker()
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel("Audio output")
+                modes
             }
             .padding(.horizontal, 24)
             .padding(.top, 8)
@@ -219,6 +217,25 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Shuffle and repeat either side of the AirPlay button.
+    private var modes: some View {
+        HStack {
+            ModeButton(systemImage: "shuffle", on: player.shuffle) { player.shuffle.toggle() }
+                .accessibilityLabel("Shuffle")
+                .accessibilityValue(player.shuffle ? "On" : "Off")
+            Spacer()
+            RoutePicker()
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Audio output")
+            Spacer()
+            ModeButton(systemImage: player.repeatMode == .one ? "repeat.1" : "repeat", on: player.repeatMode != .off) {
+                player.cycleRepeat()
+            }
+            .accessibilityLabel("Repeat")
+            .accessibilityValue(player.repeatMode.rawValue.capitalized)
+        }
+    }
+
     private var volume: some View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill")
@@ -231,6 +248,25 @@ struct NowPlayingView: View {
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Volume")
+    }
+}
+
+/// A round toggle that is lit while its mode is on.
+private struct ModeButton: View {
+    let systemImage: String
+    let on: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .background(on ? .white.opacity(0.18) : .clear, in: Circle())
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -300,7 +336,7 @@ struct TransportControls: View {
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel("Next")
-            .disabled(player.upcoming.isEmpty)
+            .disabled(!player.hasNext)
         }
         .buttonStyle(.plain)
         .disabled(player.current == nil)

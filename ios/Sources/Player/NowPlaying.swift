@@ -94,7 +94,7 @@ final class NowPlaying {
             self?.attach(image, to: track.id)
         }
         // Warm the next cover so the lock screen switches with art.
-        if let next = player.upcoming.first {
+        if let next = player.nextTrack {
             Task { [artwork] in _ = await artwork.image(for: next) }
         }
     }
