@@ -72,8 +72,9 @@ fake audio engine. They do not play audio.
    Device Management**. Such installs expire after seven days; run again from
    Xcode to renew.
 
-If the bundle identifier `com.xrath.vtamp.ios` is taken on your team, set
-`PRODUCT_BUNDLE_IDENTIFIER` in `Local.xcconfig` as the example shows.
+To use your own bundle identifier instead of `com.xrath.vtamp.ios`, set
+`PRODUCT_BUNDLE_IDENTIFIER` in `Local.xcconfig` as the example shows; it
+applies to the app, while the test bundles keep their own identifiers.
 
 ### Live check in the simulator
 

@@ -1,5 +1,5 @@
 // Copy to Local.xcconfig (untracked) to install on a physical iPhone.
 // Your team ID is under Xcode → Settings → Accounts; a free Apple ID works.
 DEVELOPMENT_TEAM = ABCDE12345
-// Uncomment when the default identifier is taken on your team.
-// PRODUCT_BUNDLE_IDENTIFIER = com.example.vtamp.ios
+// Uncomment to use your own bundle identifier instead of com.xrath.vtamp.ios.
+// PRODUCT_BUNDLE_IDENTIFIER = com.example.vtamp

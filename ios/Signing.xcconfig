@@ -1,3 +1,6 @@
 // Signing for a physical iPhone stays out of git: copy Local.xcconfig.example
 // to Local.xcconfig and set your team there. Simulator builds need neither.
+// Settings below the include can be replaced by Local.xcconfig; never set them
+// as target settings in project.yml, which would take precedence over both.
+PRODUCT_BUNDLE_IDENTIFIER = com.xrath.vtamp.ios
 #include? "Local.xcconfig"

@@ -26,7 +26,8 @@ targets:
       Release: Signing.xcconfig
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios
+        # PRODUCT_BUNDLE_IDENTIFIER lives in Signing.xcconfig: target settings
+        # here would override the value Local.xcconfig sets.
         PRODUCT_NAME: Vtamp
         INFOPLIST_FILE: Sources/App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
