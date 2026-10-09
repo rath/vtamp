@@ -187,6 +187,7 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the renderer that follows the audio clock |
 | `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
+| `screenshots` | The app screenshots shown in the main README |
 
 The app icon sets the five V-meter bars on dark gray with margins, without
 the macOS icon's tile. `scripts/build-icons.py` draws it from bar edges traced

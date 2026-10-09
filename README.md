@@ -27,6 +27,8 @@ $ vtamp                   # Same server. Same queue. Pick up where it is now.
 
 No account. No streaming subscription. No permanent pane. Your music stays on your machine.
 
+Away from the desk, the [iPhone app](#iphone-app) connects to the same server over a private network such as Tailscale, browses its Library, and plays the tracks and their saved videos on the phone.
+
 On an Apple Silicon Mac, `brew install rath/tap/vtamp` is all it takes; see [Install](#install) for the source build.
 
 ## What ships
@@ -50,6 +52,7 @@ On an Apple Silicon Mac, `brew install rath/tap/vtamp` is all it takes; see [Ins
 - JSON commands and an event stream for scripts and AI agents.
 - An optional tmux status-bar plugin for the current track and playback time.
 - Headless servers that cast Ogg Opus to remote listeners, a relay mode that plays a remote server through the local device, and optional casting from device servers, including a plain HTTP endpoint for players.
+- An optional HTTP API for apps, and a SwiftUI [iPhone app](#iphone-app) that browses the Library, shows the server's Queue, starts imports, and plays tracks and their saved videos on the phone, built and installed with your own Apple ID.
 - Saved queue, playback position, volume, shuffle, and repeat settings.
 - A small, dependency-free [landing page](https://vtamp.told.me/) in English and [Korean](https://vtamp.told.me/ko/), with [source in `site/`](site/).
 
@@ -285,6 +288,12 @@ vtamp server start --api 100.64.0.1:8800     # explicit address and port
 `server start --json` and `doctor --json` print `api_url`. The API has no TLS and no authentication: bind it to an address that only your own devices reach, such as a Tailscale address, never to a public interface. Binding `0.0.0.0` works, but the reported URL then shows `0.0.0.0`. Requests carry the same JSON as the local socket; commands that name paths on the server, `shutdown`, and subscriptions stay local. Audio and covers are chosen by Library track ID and support HTTP range requests. See [docs/protocol.md](docs/protocol.md#http-api-version-14).
 
 #### iPhone app
+
+<p align="center">
+  <img src="ios/screenshots/library.webp" width="260" alt="The iPhone app's Library tab, listing the server's tracks with their covers.">
+  <img src="ios/screenshots/now-playing.webp" width="260" alt="The iPhone app's player, with the track's cover, the Video switch, the position slider, and playback controls.">
+  <img src="ios/screenshots/queue-server.webp" width="260" alt="The iPhone app's Queue tab showing the server's Queue and the track the server is on.">
+</p>
 
 [`ios/`](ios/README.md) holds a SwiftUI app for this API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video shows in the player in step with the audio, read from the server's Matroska sidecar without re-encoding (AV1 needs an iPhone 15 Pro or later; VP9 needs the optional libvpx build). Radio channels play from their registered URLs with the server's reconnect rules; Ogg Vorbis files do not play on the iPhone. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps.
 
@@ -1195,6 +1204,8 @@ python3 scripts/capture-site.py --output /tmp/vtamp-screenshots
 An existing `VTAMP_HOME` selects the source instance; the script always uses a separate home for its copy. Missing tools, missing artwork, graphics-detection failures, and capture errors leave the existing image set in place. Temporary servers and windows are cleaned up on success, errors, Ctrl-C, and SIGTERM. A graphics-detection failure saves diagnostics from the isolated window under `/tmp/vtamp-capture-failed-*`; remove that directory when finished investigating. It may contain song titles and local paths.
 
 Review the resulting images before committing: screenshots show the selected library's actual song titles and album covers. Music files, source artwork, and databases are never copied into the site. The checked-in captures use the maintainer's selected library; depicted album artwork belongs to its respective owners and is not covered by vtamp's MIT license. After replacing the captures, run `python3 scripts/build-og.py` to recompose the social preview cards `site/og.png` and `site/og-ko.png` from the compact Queue capture (needs Pillow and fontTools).
+
+The iPhone screenshots in `ios/screenshots/` do not come from this script. They were taken in the iPhone 17 Pro simulator in dark mode, with the app connected to an isolated headless server (`--api` on loopback) that served a paused copy of the same library, playback muted, then scaled to 600 pixels wide and saved as lossy WebP (`cwebp -q 75`). The same note on depicted artwork applies.
 
 Capture-script checks (no GUI or personal music required):
 
