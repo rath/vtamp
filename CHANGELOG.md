@@ -4,6 +4,9 @@
 
 ### Added
 
+- `server start --api tailscale` detects the local Tailscale IPv4 address via
+  `tailscale ip -4` and serves the app API on port 8700. Failed lookups prevent
+  startup; explicit `--api IP:PORT` addresses remain supported.
 - A Library kind filter: `f` cycles all → video → radio in the TUI, shown in
   the panel title and cleared with the search by `Esc`; `A` queues only the
   kinds the view shows. The CLI takes `library list --kind` and

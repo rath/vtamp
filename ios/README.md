@@ -15,9 +15,13 @@ private network such as Tailscale and bind the API to that address.
 On the machine with the music, bind the API to its Tailscale address:
 
 ```sh
-vtamp server start --api "$(tailscale ip -4):8700"
-vtamp server start --headless --api "$(tailscale ip -4):8700"   # Linux, or no audio device
+vtamp server start --api tailscale
+vtamp server start --headless --api tailscale   # Linux, or no audio device
 ```
+
+`--api tailscale` detects the machine's Tailscale IPv4 address and uses port
+8700. The Tailscale CLI must be on `PATH`; lookup failure stops startup.
+An explicit `--api IP:PORT` still works for other addresses or ports.
 
 `vtamp server start --json` prints `api_url`. A server that is already running
 without `--api` must be stopped first (`vtamp server stop`). In the app, open

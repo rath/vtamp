@@ -1,5 +1,8 @@
+mod api_address;
 mod archive_progress;
 mod plugins;
+
+use api_address::ApiAddress;
 
 use crate::{
     client::{Client, Launch},
@@ -525,9 +528,9 @@ pub enum Server {
         /// Serve the cast over plain HTTP at this address for players and browsers; implies --cast.
         #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
         cast_http: Option<std::net::SocketAddr>,
-        /// Serve the JSON API and track files for apps over plain HTTP at this address.
+        /// Serve the JSON API and track files at ADDR, or use "tailscale" for this node's IPv4 address on port 8700.
         #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
-        api: Option<std::net::SocketAddr>,
+        api: Option<ApiAddress>,
     },
     Status,
     Stop,
@@ -863,6 +866,10 @@ pub async fn run(args: Args) -> Result<()> {
             if remote.is_some() && !cfg!(target_os = "macos") {
                 bail!(RELAY_UNAVAILABLE);
             }
+            let api = match api {
+                Some(address) => Some(address.resolve().await?),
+                None => None,
+            };
             let launch = match remote {
                 Some(remote) => Launch::Relay(std::path::absolute(remote)?),
                 None if headless => Launch::Headless {

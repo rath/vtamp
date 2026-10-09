@@ -275,9 +275,12 @@ The token is created once and kept in `cast.json` in the data directory; delete 
 `--api ADDR` serves a JSON API and the Library's audio and cover files over plain HTTP, for apps that browse the Library, read the Queue, start YouTube imports, and play files themselves:
 
 ```sh
-vtamp server start --api 100.64.0.1:8700      # this machine's Tailscale address
-vtamp server start --headless --api 100.64.0.1:8700
+vtamp server start --api tailscale          # detect this machine's Tailscale IPv4, port 8700
+vtamp server start --headless --api tailscale
+vtamp server start --api 100.64.0.1:8800     # explicit address and port
 ```
+
+`--api tailscale` runs `tailscale ip -4` before starting the server and binds only that address on port 8700. It requires the Tailscale CLI on `PATH`; a failed lookup, invalid output, or a five-second timeout prevents startup. Use an explicit `IP:PORT` for a different port.
 
 `server start --json` and `doctor --json` print `api_url`. The API has no TLS and no authentication: bind it to an address that only your own devices reach, such as a Tailscale address, never to a public interface. Binding `0.0.0.0` works, but the reported URL then shows `0.0.0.0`. Requests carry the same JSON as the local socket; commands that name paths on the server, `shutdown`, and subscriptions stay local. Audio and covers are chosen by Library track ID and support HTTP range requests. See [docs/protocol.md](docs/protocol.md#http-api-version-14).
 

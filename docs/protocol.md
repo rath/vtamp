@@ -357,6 +357,14 @@ start --api` fails while a server without the API is running. Like the HTTP
 cast, the API has no TLS and no authentication; anyone who can reach the address
 can read the Library and control playback.
 
+`ADDR` also accepts the literal `tailscale`: the CLI runs `tailscale ip -4`
+once before launching the server and passes the resulting IPv4 address with
+port 8700 to the listener. The Tailscale CLI must be on `PATH`. Lookup failure,
+invalid output, or a five-second timeout fails the command without starting a
+server or falling back to another address. `api_url` reports the resolved
+address as usual. For other ports, supply an explicit `IP:PORT`;
+`tailscale:PORT` and a bare `--api` are not supported.
+
 | Route | Answer |
 | --- | --- |
 | `GET /api/server` | Envelope whose `data` is `server_info` plus `protocol_version`, `import_available`, and `cast` (`CastInfo`). |
