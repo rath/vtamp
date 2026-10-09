@@ -72,7 +72,7 @@ struct PlayerTests {
 
     @Test func unplayableTracksAreLeftOutAndTheIndexFollows() {
         let mixed = [
-            Track(id: "radio", path: nil, url: "https://radio", title: "Radio"),
+            Track(id: "opus", path: "/m/x.opus", title: "Opus"),
             Track(id: "a", path: "/m/a.m4a", title: "A"),
             Track(id: "ogg", path: "/m/b.ogg", title: "Ogg"),
             Track(id: "c", path: "/m/c.mp3", title: "C"),
@@ -197,7 +197,7 @@ struct PlayerTests {
         player.select(2)
         player.playNow(tracks("e")[0])
         #expect(player.playRequests == 3)
-        player.play([Track(id: "radio", path: nil, url: "https://radio", title: "Radio")], startingAt: 0)
+        player.play([Track(id: "ogg", path: "/m/x.ogg", title: "Ogg")], startingAt: 0)
         #expect(player.playRequests == 3, "a track that cannot play is not a request")
     }
 
@@ -275,12 +275,81 @@ struct PlayerTests {
         #expect(RepeatMode.off.next == .all && RepeatMode.all.next == .one && RepeatMode.one.next == .off)
     }
 
+    private var radio: Track { Track(id: "fm", path: nil, url: "https://radio.example/live", title: "FM") }
+
+    @Test func radioPlaysFromItsURLWithoutATimelineOrAPrefetch() {
+        player.play(tracks("a") + [radio], startingAt: 0)
+        #expect(engine.prefetched.isEmpty, "a station is joined when it plays, not before")
+        player.next()
+        #expect(engine.loaded.last?.absoluteString == "https://radio.example/live")
+        #expect(player.isLive && player.duration == nil)
+        engine.emit(.state(playing: true, buffering: true))
+        #expect(player.liveStatus == .connecting)
+        engine.emit(.ready(duration: nil))
+        #expect(player.liveStatus == .buffering)
+        engine.emit(.state(playing: true, buffering: false))
+        #expect(player.liveStatus == .live)
+        player.seek(to: 30)
+        #expect(engine.seeks.isEmpty, "a broadcast has no position")
+        engine.emit(.time(30))
+        player.previous()
+        #expect(player.current?.id == "a" && engine.seeks.isEmpty, "Previous leaves the station instead of restarting it")
+    }
+
+    @Test func pausingRadioLeavesTheStationAndResumingRejoinsIt() {
+        player.play([radio], startingAt: 0)
+        engine.emit(.ready(duration: nil))
+        player.pause()
+        #expect(engine.stops == 1 && engine.pauses == 0)
+        #expect(player.liveStatus == .paused && player.current?.id == "fm")
+        player.play()
+        #expect(engine.loaded.count == 2, "resume connects again")
+        #expect(player.liveStatus == .live)
+    }
+
+    @Test func aDroppedRadioStreamReconnectsWithBackoffAndNeverAdvances() async {
+        let waited = Waits()
+        player.sleep = { waited.delays.append($0) }
+        player.play([radio] + tracks("a"), startingAt: 0)
+        engine.emit(.ready(duration: nil))
+        engine.emit(.failed("Lost"))
+        #expect(player.liveStatus == .reconnecting && player.current?.id == "fm" && player.isPlaying)
+        engine.emit(.state(playing: false, buffering: false))
+        #expect(player.liveStatus == .reconnecting, "the engine's stop does not read as a pause")
+        await player.retryTask?.value
+        #expect(engine.loaded.count == 2)
+        engine.emit(.failed("Lost"))
+        await player.retryTask?.value
+        engine.emit(.ended)
+        await player.retryTask?.value
+        #expect(waited.delays == [.seconds(1), .seconds(2), .seconds(4)])
+        engine.emit(.ready(duration: nil))
+        engine.emit(.failed("Lost"))
+        await player.retryTask?.value
+        #expect(waited.delays.last == .seconds(1), "a healthy stream resets the backoff")
+        engine.emit(.failed("Lost"))
+        player.pause()
+        #expect(player.retryTask == nil && player.liveStatus == .paused, "pause cancels the wait")
+        await Task.yield()
+        #expect(waited.delays.count == 4, "a cancelled wait never starts")
+        player.play()
+        engine.emit(.failed("No such station", recoverable: false))
+        #expect(player.liveStatus == .paused && player.retryTask == nil)
+        #expect(player.lastError?.contains("check its URL") == true)
+        #expect(player.current?.id == "fm", "radio never advances the queue")
+    }
+
     @Test func readyReportsTheFileDuration() {
         player.play([Track(id: "a", path: "/m/a.m4a", title: "A", durationMs: 1000)], startingAt: 0)
         #expect(player.duration == 1)
         engine.emit(.ready(duration: 1.25))
         #expect(player.duration == 1.25)
     }
+}
+
+@MainActor
+final class Waits {
+    var delays: [Duration] = []
 }
 
 @MainActor

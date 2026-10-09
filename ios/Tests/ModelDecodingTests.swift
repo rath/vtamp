@@ -25,7 +25,8 @@ struct ModelDecodingTests {
         #expect(!wav.hasCover)
         let radio = try #require(byTitle["Test FM"])
         #expect(radio.kind == .radio)
-        #expect(radio.playability == .radio)
+        #expect(radio.isPlayable && radio.isLive)
+        #expect(radio.subtitle == "example.com", "the host stands in for the artist")
         #expect(radio.durationText == "LIVE")
     }
 

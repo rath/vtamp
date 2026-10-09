@@ -270,13 +270,43 @@ private struct ModeButton: View {
     }
 }
 
-/// The position slider with the elapsed and remaining time.
+/// The position slider with the elapsed and remaining time, or a radio
+/// channel's state in its place.
 struct Timeline: View {
     @Environment(Player.self) private var player
     @State private var scrub: TimeInterval?
     var scrubbing: Binding<Bool>?
 
     var body: some View {
+        if let status = player.liveStatus {
+            live(status)
+        } else {
+            slider
+        }
+    }
+
+    private func live(_ status: Player.LiveStatus) -> some View {
+        let label = switch status {
+        case .paused: "Paused"
+        case .connecting: "Connecting…"
+        case .buffering: "Buffering…"
+        case .live: "LIVE"
+        case .reconnecting: "Reconnecting…"
+        }
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(status == .live ? Color.red : Color.secondary)
+                .frame(width: 8, height: 8)
+            Text(label)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("liveStatus")
+    }
+
+    @ViewBuilder private var slider: some View {
         let duration = max(player.duration ?? 0, 0)
         let shown = scrub ?? player.position
         VStack(spacing: 2) {

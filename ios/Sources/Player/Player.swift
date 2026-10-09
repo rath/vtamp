@@ -49,6 +49,10 @@ final class Player {
     private(set) var duration: TimeInterval?
     /// The last track that could not play, shown briefly.
     var lastError: String?
+    /// The current item has reported that it can play.
+    private(set) var isReady = false
+    /// Waiting to rejoin a radio stream that dropped.
+    private(set) var reconnecting = false
     /// How many times a track was chosen to play (a Library or Queue tap, an
     /// import's Play); the player opens on each. Next, previous, and resume
     /// do not count.
@@ -61,6 +65,10 @@ final class Player {
 
     /// Picks a shuffle candidate: a position below the count. Tests make it deterministic.
     @ObservationIgnored var pick: (Int) -> Int = { Int.random(in: 0..<$0) }
+    /// Waits out a radio reconnect delay. Tests make it instant.
+    @ObservationIgnored var sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    @ObservationIgnored private(set) var retryTask: Task<Void, Never>?
+    @ObservationIgnored private var retryAttempts = 0
 
     @ObservationIgnored private let engine: any PlaybackEngine
     @ObservationIgnored private let resolve: (Track) -> URL?
@@ -93,6 +101,22 @@ final class Player {
 
     var hasNext: Bool { nextIndex != nil }
 
+    /// The current track is a radio channel: no timeline, no natural ending.
+    var isLive: Bool { current?.isLive == true }
+
+    /// Where a radio channel stands, as the server reports it; nothing for files.
+    enum LiveStatus: Equatable, Sendable {
+        case paused, connecting, buffering, live, reconnecting
+    }
+
+    var liveStatus: LiveStatus? {
+        guard isLive else { return nil }
+        if reconnecting { return .reconnecting }
+        if !isPlaying { return .paused }
+        if isBuffering { return isReady ? .buffering : .connecting }
+        return .live
+    }
+
     func cycleRepeat() { repeatMode = repeatMode.next }
 
     var isMuted: Bool {
@@ -113,6 +137,7 @@ final class Player {
         queue = kept.map(\.element)
         index = kept.firstIndex { $0.offset == start }
         failures = 0
+        retryAttempts = 0
         played = []
         history = []
         playRequests += 1
@@ -131,6 +156,7 @@ final class Player {
             index = queue.count - 1
         }
         failures = 0
+        retryAttempts = 0
         playRequests += 1
         loadCurrent(autoplay: true)
     }
@@ -209,11 +235,14 @@ final class Player {
     }
 
     func clear() {
+        cancelRetry()
+        retryAttempts = 0
         engine.stop()
         video?.stopped()
         queue = []
         index = nil
         loadedID = nil
+        isReady = false
         isPlaying = false
         isBuffering = false
         position = 0
@@ -226,6 +255,7 @@ final class Player {
         if let index { history.append(index) }
         index = position
         failures = 0
+        retryAttempts = 0
         playRequests += 1
         loadCurrent(autoplay: true)
     }
@@ -242,7 +272,22 @@ final class Player {
         }
     }
 
-    func pause() { engine.pause() }
+    /// A file pauses in place. A radio channel is left, not held: resuming
+    /// connects to the broadcast as it is then.
+    func pause() {
+        cancelRetry()
+        retryAttempts = 0
+        guard isLive else {
+            engine.pause()
+            return
+        }
+        engine.stop()
+        loadedID = nil
+        isReady = false
+        isPlaying = false
+        isBuffering = false
+        onStateChange?()
+    }
 
     func togglePlayPause() {
         isPlaying ? pause() : play()
@@ -258,24 +303,28 @@ final class Player {
         if shuffle, played.count >= queue.count { played = [] }
         history.append(index)
         self.index = target
+        retryAttempts = 0
         loadCurrent(autoplay: true)
     }
 
     /// Restart the track after three seconds or with nothing before it, else
-    /// go back: through the shuffle's own trail, or one position up.
+    /// go back: through the shuffle's own trail, or one position up. A radio
+    /// channel has nothing to restart.
     func previous() {
         guard let index else { return }
         let back = shuffle ? history.last : (index > 0 ? index - 1 : nil)
-        if position > 3 || back == nil {
-            seek(to: 0)
-        } else if let back {
-            if shuffle { history.removeLast() }
-            self.index = back
-            loadCurrent(autoplay: true)
+        guard let back, isLive || position <= 3 else {
+            if !isLive { seek(to: 0) }
+            return
         }
+        if shuffle { history.removeLast() }
+        self.index = back
+        retryAttempts = 0
+        loadCurrent(autoplay: true)
     }
 
     func seek(to seconds: TimeInterval) {
+        guard !isLive else { return }
         position = seconds
         engine.seek(to: seconds)
         video?.seek(to: seconds)
@@ -290,13 +339,20 @@ final class Player {
         return false
     }
 
+    /// A file comes from the server; a radio channel from its registered URL.
+    private func url(for track: Track) -> URL? {
+        track.isLive ? track.url.flatMap { URL(string: $0) } : resolve(track)
+    }
+
     private func loadCurrent(autoplay: Bool) {
         guard let track = current else { return }
-        guard let url = resolve(track) else {
+        guard let url = url(for: track) else {
             lastError = "Connect to a server first"
             return
         }
+        cancelRetry()
         loadedID = track.id
+        isReady = false
         position = 0
         duration = track.duration
         isBuffering = autoplay
@@ -315,7 +371,8 @@ final class Player {
         nextIndex = follower()
         guard let nextIndex else { return }
         let next = queue[nextIndex]
-        if let url = resolve(next) {
+        // A station is joined when it plays, not before.
+        if !next.isLive, let url = resolve(next) {
             engine.prefetch(url, mimeType: next.mimeType)
         }
     }
@@ -333,8 +390,41 @@ final class Player {
         return others.isEmpty ? index : others[pick(others.count)]
     }
 
-    /// The end of the queue: stay on the last track, paused at its start.
+    /// Leave the station and come back after 1, 2, 4, 8, 16, then 30 seconds,
+    /// as the server does; pause, stop, and a change of track cancel the wait.
+    private func reconnect() {
+        engine.stop()
+        loadedID = nil
+        isReady = false
+        reconnecting = true
+        isPlaying = true
+        isBuffering = true
+        let delay = Duration.seconds(min(1 << min(retryAttempts, 5), 30))
+        retryAttempts += 1
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            guard !Task.isCancelled, let sleep = self?.sleep else { return }
+            await sleep(delay)
+            guard let self, !Task.isCancelled else { return }
+            self.retryTask = nil
+            self.loadCurrent(autoplay: true)
+        }
+        onStateChange?()
+    }
+
+    private func cancelRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        reconnecting = false
+    }
+
+    /// The end of the queue: stay on the last track, paused at its start; a
+    /// radio channel is left.
     private func finish() {
+        if isLive {
+            pause()
+            return
+        }
         engine.pause()
         engine.seek(to: 0)
         video?.seek(to: 0)
@@ -346,6 +436,8 @@ final class Player {
         switch event {
         case let .ready(duration):
             failures = 0
+            retryAttempts = 0
+            isReady = true
             if let duration, duration > 0 { self.duration = duration }
             if let track = current {
                 video?.ready(track: track, timebase: engine.timebase)
@@ -354,19 +446,33 @@ final class Player {
         case let .time(seconds):
             position = seconds
         case let .state(playing, buffering):
+            // The engine has nothing while a reconnect waits.
+            guard !reconnecting else { return }
             let changed = playing != isPlaying
             isPlaying = playing
             isBuffering = buffering
             if changed { onStateChange?() }
         case .ended:
-            if repeatMode == .one {
+            if isLive {
+                // A broadcast does not end; the connection did.
+                reconnect()
+            } else if repeatMode == .one {
                 seek(to: 0)
                 engine.play()
             } else {
                 next()
             }
-        case let .failed(message):
+        case let .failed(message, recoverable):
             let title = current?.title ?? "Track"
+            if isLive {
+                if recoverable {
+                    reconnect()
+                } else {
+                    lastError = "\(title): unsupported or unavailable stream; check its URL"
+                    pause()
+                }
+                return
+            }
             lastError = "\(title): \(message)"
             failures += 1
             if failures < queue.count, hasNext {

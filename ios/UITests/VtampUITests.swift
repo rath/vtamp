@@ -26,7 +26,7 @@ final class VtampUITests: XCTestCase {
         // which must count as much as the text.
         let tone = row(app, "Tone")
         XCTAssertTrue(tone.waitForExistence(timeout: 15), "The Library lists the server's tracks")
-        XCTAssertFalse(row(app, "Test FM").isEnabled, "Radio cannot play on iPhone")
+        XCTAssertTrue(row(app, "Test FM").isEnabled, "Radio plays on the iPhone from its URL")
         snapshot(app, "library")
         gap(tone).tap()
         XCTAssertTrue(app.buttons["Pause"].firstMatch.waitForExistence(timeout: 15), "Playback starts")

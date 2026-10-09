@@ -39,7 +39,6 @@ struct TrackRow: View {
     private var detail: String {
         switch track.playability {
         case .playable: track.subtitle.isEmpty ? " " : track.subtitle
-        case .radio: "Radio plays on the server only"
         case .unsupportedFormat: "\(track.fileExtension.uppercased()) files cannot play on iPhone"
         }
     }

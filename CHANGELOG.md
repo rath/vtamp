@@ -32,8 +32,9 @@
 - An iPhone app in `ios/` for that API: it browses and searches the Library,
   shows the server's Queue, starts YouTube imports with optional time ranges,
   and plays Library files on the phone with its own queue, background audio,
-  and lock-screen controls. Built with Xcode and XcodeGen; installed with your
-  own Apple ID.
+  shuffle and repeat, and lock-screen controls. Radio channels play from their
+  registered URLs with the server's reconnect rules. Built with Xcode and
+  XcodeGen; installed with your own Apple ID.
 - The iPhone app shows a track's saved video in the player, in step with the
   audio: it demuxes the server's Matroska sidecar itself and hands the stored
   AV1, H.264, or HEVC samples to the phone's decoder, so nothing is re-encoded.

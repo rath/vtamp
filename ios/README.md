@@ -64,9 +64,22 @@ the phone, or switching apps stops the demuxer, the decoder, and the video
 downloads, and the audio is never affected by a video that cannot be shown.
 Outside the full-screen video the app stays in portrait.
 
-Not on the iPhone: radio channels and Ogg Vorbis files (they appear greyed
-out), the server's loudness normalization, and controlling the server's own
-playback. Nothing is downloaded for offline use.
+### Live radio
+
+A registered radio channel plays on the phone from its registered URL: the
+phone connects to the station itself, over whatever network it is on, and the
+server is not involved. HLS, MP3, and AAC streams play natively, as on the
+server. The player shows Connecting, Buffering, LIVE, or Reconnecting in place
+of the position slider; there is no seeking and no natural ending, so the queue
+never advances by itself and the lock screen shows a live stream. Pause closes
+the connection and resume connects to the current broadcast. A dropped
+connection retries after 1, 2, 4, 8, 16, then 30 seconds; pause, next, and
+previous cancel the wait, and an unsupported or unavailable stream pauses with a
+message. Channels show their host where files show the artist.
+
+Not on the iPhone: Ogg Vorbis files (they appear greyed out), the server's
+loudness normalization, and controlling the server's own playback. Nothing is
+downloaded for offline use.
 
 ### VP9 with libvpx
 

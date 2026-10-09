@@ -283,7 +283,7 @@ vtamp server start --headless --api 100.64.0.1:8700
 
 #### iPhone app
 
-[`ios/`](ios/README.md) holds a SwiftUI app for this API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video shows in the player in step with the audio, read from the server's Matroska sidecar without re-encoding (AV1 needs an iPhone 15 Pro or later; VP9 needs the optional libvpx build). Radio channels and Ogg Vorbis files do not play on the iPhone. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps.
+[`ios/`](ios/README.md) holds a SwiftUI app for this API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video shows in the player in step with the audio, read from the server's Matroska sidecar without re-encoding (AV1 needs an iPhone 15 Pro or later; VP9 needs the optional libvpx build). Radio channels play from their registered URLs with the server's reconnect rules; Ogg Vorbis files do not play on the iPhone. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps.
 
 ### Linux builds are headless servers
 

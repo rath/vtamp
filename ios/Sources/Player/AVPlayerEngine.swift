@@ -55,7 +55,8 @@ final class AVPlayerEngine: PlaybackEngine {
             center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { [weak self] note in
                 let error = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
                 let message = error?.localizedDescription ?? "Playback stopped"
-                MainActor.assumeIsolated { self?.emit(.failed(message), generation: current) }
+                let recoverable = Self.recoverable(error)
+                MainActor.assumeIsolated { self?.emit(.failed(message, recoverable: recoverable), generation: current) }
             },
         ]
         player.replaceCurrentItem(with: item)
@@ -94,6 +95,13 @@ final class AVPlayerEngine: PlaybackEngine {
         onEvent?(event)
     }
 
+    /// The same codes the server treats as a dead source rather than a dropped
+    /// connection: unsupported format, cannot open, bad or unsupported URL, not found.
+    private nonisolated static func recoverable(_ error: (any Error)?) -> Bool {
+        guard let code = (error as NSError?)?.code else { return true }
+        return ![-11828, -11829, -1000, -1002, -1100].contains(code)
+    }
+
     private static func asset(_ url: URL, mimeType: String?) -> AVURLAsset {
         // The URL has no extension; name the type when AVFoundation knows it.
         var options: [String: Any] = [:]
@@ -115,7 +123,9 @@ final class AVPlayerEngine: PlaybackEngine {
                 let duration = item.duration
                 event = .ready(duration: duration.isNumeric ? duration.seconds : nil)
             case .failed:
-                event = .failed(item.error?.localizedDescription ?? "The file cannot be played")
+                event = .failed(
+                    item.error?.localizedDescription ?? "The file cannot be played",
+                    recoverable: recoverable(item.error))
             default:
                 event = nil
             }

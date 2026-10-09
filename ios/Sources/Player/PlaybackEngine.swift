@@ -9,7 +9,9 @@ enum PlaybackEvent: Equatable, Sendable {
     /// Whether playback is requested, and whether it waits for data.
     case state(playing: Bool, buffering: Bool)
     case ended
-    case failed(String)
+    /// `recoverable` is false for a source that cannot work (bad URL,
+    /// unsupported format), true for a connection that dropped.
+    case failed(String, recoverable: Bool = true)
 }
 
 /// The seam between the queue logic and AVFoundation, so the queue is testable.

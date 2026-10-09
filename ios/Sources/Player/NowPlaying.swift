@@ -87,6 +87,10 @@ final class NowPlaying {
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
         if !track.album.isEmpty { info[MPMediaItemPropertyAlbumTitle] = track.album }
+        if track.isLive {
+            info[MPNowPlayingInfoPropertyIsLiveStream] = true
+            if track.artist.isEmpty { info[MPMediaItemPropertyArtist] = track.subtitle }
+        }
         center.nowPlayingInfo = info
         stateChanged()
         artworkTask = Task { [weak self, artwork] in
@@ -111,9 +115,11 @@ final class NowPlaying {
     private func stateChanged() {
         let center = MPNowPlayingInfoCenter.default()
         guard var info = center.nowPlayingInfo else { return }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.position
+        if !player.isLive {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.position
+            if let duration = player.duration { info[MPMediaItemPropertyPlaybackDuration] = duration }
+        }
         info[MPNowPlayingInfoPropertyPlaybackRate] = player.isPlaying && !player.isBuffering ? 1.0 : 0.0
-        if let duration = player.duration { info[MPMediaItemPropertyPlaybackDuration] = duration }
         center.nowPlayingInfo = info
         center.playbackState = player.isPlaying ? .playing : .paused
     }

@@ -81,8 +81,6 @@ struct Track: Decodable, Hashable, Identifiable, Sendable {
 
     enum Playability: Equatable, Sendable {
         case playable
-        /// Radio streams play on the server only.
-        case radio
         /// AVFoundation has no Ogg demuxer.
         case unsupportedFormat
     }
@@ -93,9 +91,15 @@ struct Track: Decodable, Hashable, Identifiable, Sendable {
     }
 
     var playability: Playability {
-        if path == nil { return .radio }
+        // A radio channel plays from its registered URL, as on the server.
+        if path == nil { return url == nil ? .unsupportedFormat : .playable }
         return ["ogg", "oga", "opus", "spx"].contains(fileExtension) ? .unsupportedFormat : .playable
     }
+
+    var isLive: Bool { kind == .radio }
+
+    /// The station's host, where a file shows its artist and album.
+    var radioHost: String? { url.flatMap(URL.init)?.host() }
 
     var isPlayable: Bool { playability == .playable }
 
@@ -115,10 +119,12 @@ struct Track: Decodable, Hashable, Identifiable, Sendable {
 
     /// Artist and album, leaving out missing parts.
     var subtitle: String {
-        [artist, album]
+        let parts = [artist, album]
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && $0 != "Unknown artist" }
             .joined(separator: " · ")
+        if parts.isEmpty, isLive, let host = radioHost { return host }
+        return parts
     }
 
     var duration: TimeInterval? { durationMs.map { TimeInterval($0) / 1000 } }
