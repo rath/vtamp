@@ -47,6 +47,11 @@ targets:
         buildPhase: resources
     dependencies:
       - target: Vtamp
+    # The same optional includes as the app, so the VP9 tests see VTAMP_VP9
+    # exactly when the app has the decoder.
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios.tests
@@ -58,6 +63,10 @@ targets:
       - path: UITests
     dependencies:
       - target: Vtamp
+    # Signing from Local.xcconfig, so device runs can build this target too.
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios.uitests

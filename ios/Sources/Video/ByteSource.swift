@@ -5,6 +5,10 @@ enum VideoError: Error, Equatable {
     case truncated
     case noVideoTrack
     case unsupportedCodec(String)
+    /// A codec the app decodes in software only when built with that decoder.
+    case missingDecoder(String)
+    /// The software decoder produced a picture format the app does not copy.
+    case unsupportedPixelFormat
     case unsupportedLacing
     /// The server's file changed under us (a different `ETag`), or it answered
     /// a whole file where a range was asked for.
@@ -18,6 +22,8 @@ enum VideoError: Error, Equatable {
         case .truncated: "The video file ends early"
         case .noVideoTrack: "The file has no picture track"
         case let .unsupportedCodec(codec): "This iPhone cannot decode \(codec) video"
+        case let .missingDecoder(codec): "\(codec) video needs the libvpx build; see ios/README.md"
+        case .unsupportedPixelFormat: "Only 8-bit 4:2:0 VP9 is supported"
         case .unsupportedLacing: "Laced video blocks are not supported"
         case .sourceChanged: "The video changed on the server"
         case let .http(status): "The server answered HTTP \(status)"

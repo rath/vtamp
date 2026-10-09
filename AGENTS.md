@@ -98,7 +98,10 @@ xcodebuild -project ios/Vtamp.xcodeproj -scheme Vtamp \
 ```
 
 The UI test is skipped without `TEST_RUNNER_VTAMP_UITEST_SERVER`; report that as
-a skip. Point it only at an isolated server (`ios/README.md`). Signing stays in
+a skip. Point it only at an isolated server (`ios/README.md`). The VP9 tests
+are skipped until `ios/scripts/build-libvpx.sh` has built libvpx into the
+ignored `ios/Vendor/`; report that as a skip too, and never commit anything
+from `ios/Vendor/`. Signing stays in
 the untracked `ios/Local.xcconfig`; never commit a team ID. A protocol version
 bump also changes `VtampClient.protocolVersion` and the app's fixtures.
 

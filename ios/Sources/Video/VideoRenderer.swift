@@ -188,7 +188,11 @@ final class VideoRenderer: VideoSink {
         }
         switch codec {
         case .vp9:
-            throw VideoError.unsupportedCodec(codec.name)
+            #if VTAMP_VP9
+            return DecodedFrameSource(file: file, decoder: try VP9Decoder())
+            #else
+            throw VideoError.missingDecoder(codec.name)
+            #endif
         case .av1, .h264, .hevc:
             let format = try VideoFormat.description(for: file.track)
             guard VideoFormat.canDecode(format) else { throw VideoError.unsupportedCodec(codec.name) }

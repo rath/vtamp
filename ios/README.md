@@ -57,6 +57,31 @@ Not on the iPhone: radio channels and Ogg Vorbis files (they appear greyed
 out), the server's loudness normalization, shuffle and repeat, and controlling
 the server's own playback. Nothing is downloaded for offline use.
 
+### VP9 with libvpx
+
+iOS 18 has no VP9 decoder, so VP9 sidecars (older YouTube imports, and videos
+without an AV1 encode) use [libvpx](https://chromium.googlesource.com/webm/libvpx),
+the WebM project's decoder, compiled into the app:
+
+```sh
+ios/scripts/build-libvpx.sh
+xcodegen generate --spec ios/project.yml
+```
+
+The script clones libvpx at the pinned tag (`v1.17.0`, commit checked), builds
+the VP9 decoder only (no VP8, no encoder) as a static library for the iPhone
+and, when the simulator SDK accepts it, for the Apple-silicon simulator, and
+writes the headers, a module map, and `Vendor/libvpx/libvpx.xcconfig` that
+`Signing.xcconfig` includes if present. `ios/Vendor/` is ignored by git: nothing
+built is committed, and a checkout without that directory still builds and
+passes its tests (the VP9 tests report as skipped). The decoder runs in
+software on a background actor and copies each picture into an NV12 buffer the
+display layer shows; 480p costs a few percent of one core.
+
+libvpx is BSD-3-Clause. Its notice is shown under **Settings → Licenses**
+(`Sources/App/Licenses/libvpx.txt`) and must travel with any copy of the app,
+and the `PATENTS` grant lands next to the build in `Vendor/libvpx/`.
+
 ## Build
 
 Requirements: Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen)

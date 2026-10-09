@@ -50,6 +50,7 @@ struct SettingsView: View {
                     Text("Plays Library files on this iPhone. The server's playback and Queue are not changed.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    NavigationLink("Licenses") { LicensesView() }
                 }
             }
             .navigationTitle("Settings")

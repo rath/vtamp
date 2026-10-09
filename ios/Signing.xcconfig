@@ -4,3 +4,5 @@
 // as target settings in project.yml, which would take precedence over both.
 PRODUCT_BUNDLE_IDENTIFIER = com.xrath.vtamp.ios
 #include? "Local.xcconfig"
+// libvpx for VP9 sidecars, built by ios/scripts/build-libvpx.sh; absent until then.
+#include? "Vendor/libvpx/libvpx.xcconfig"
