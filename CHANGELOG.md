@@ -2,27 +2,14 @@
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-09
+
+A server can serve its Library to apps over HTTP, and an iPhone app in `ios/`
+plays that Library, its saved videos, and radio on the phone. YouTube imports
+take time ranges, and the Library filters by kind.
+
 ### Added
 
-- `server start --api tailscale` detects the local Tailscale IPv4 address via
-  `tailscale ip -4` and serves the app API on port 8700. Failed lookups prevent
-  startup; explicit `--api IP:PORT` addresses remain supported.
-- A Library kind filter: `f` cycles all → video → radio in the TUI, shown in
-  the panel title and cleared with the search by `Esc`; `A` queues only the
-  kinds the view shows. The CLI takes `library list --kind` and
-  `library search --kind` with `audio`, `video`, or `radio`.
-- Tracks carry `video: true` when their saved video sidecar exists, and Library
-  and Queue rows show a `· VIDEO` suffix like the existing `· LIVE`. Scans,
-  video publication, and archive restores keep the flag current.
-- YouTube time ranges: single-video imports take Start/End fields in the TUI
-  download options and `library add --start/--end` in the CLI (whole seconds,
-  `M:SS`, or `H:MM:SS`). Excerpts and full downloads coexist as separate tracks,
-  Library, Queue, and import history show the range, and retries, video
-  upgrades, deletion, and archives keep it.
-- Range downloads copy video packets without re-encoding, so the source codec
-  is kept and boundaries fall on nearby source keyframes rather than exact
-  frames. Imports show FFmpeg's progress while copying: media time copied,
-  percentage, processing speed, and estimated time remaining.
 - `server start --api ADDR` serves a JSON API for apps over plain HTTP:
   `POST /api/rpc` takes the local socket's request JSON, `GET /api/server`
   describes the server, and `/api/library/ID/audio` and `/cover` return a
@@ -32,6 +19,9 @@
 - `/api/library/ID/video` serves a track's saved silent video sidecar as the
   Matroska file it is, with the same range requests and validators, so apps can
   show the picture without the server re-encoding anything.
+- `server start --api tailscale` detects the local Tailscale IPv4 address via
+  `tailscale ip -4` and serves the app API on port 8700. Failed lookups prevent
+  startup; explicit `--api IP:PORT` addresses remain supported.
 - An iPhone app in `ios/` for that API: it browses and searches the Library,
   shows the server's Queue, starts YouTube imports with optional time ranges,
   and plays Library files on the phone with its own queue, background audio,
@@ -45,6 +35,22 @@
   A Cover / Video button keeps the choice, and the picture opens over the
   whole screen in landscape. VP9 sidecars decode in software with libvpx when
   the app is built with it.
+- YouTube time ranges: single-video imports take Start/End fields in the TUI
+  download options and `library add --start/--end` in the CLI (whole seconds,
+  `M:SS`, or `H:MM:SS`). Excerpts and full downloads coexist as separate tracks,
+  Library, Queue, and import history show the range, and retries, video
+  upgrades, deletion, and archives keep it.
+- Range downloads copy video packets without re-encoding, so the source codec
+  is kept and boundaries fall on nearby source keyframes rather than exact
+  frames. Imports show FFmpeg's progress while copying: media time copied,
+  percentage, processing speed, and estimated time remaining.
+- A Library kind filter: `f` cycles all → video → radio in the TUI, shown in
+  the panel title and cleared with the search by `Esc`; `A` queues only the
+  kinds the view shows. The CLI takes `library list --kind` and
+  `library search --kind` with `audio`, `video`, or `radio`.
+- Tracks carry `video: true` when their saved video sidecar exists, and Library
+  and Queue rows show a `· VIDEO` suffix like the existing `· LIVE`. Scans,
+  video publication, and archive restores keep the flag current.
 
 ### Changed
 
@@ -52,12 +58,33 @@
   backfilled from existing sidecars in the catalog and the saved queue, and
   imports are identified by video ID plus normalized range instead of video ID
   alone. Track IDs, metadata, queue, and sessions are preserved. `server_info`
-  reports the HTTP API's `api_url`. Restart the server after upgrading; older
-  binaries reject the new database.
+  reports the HTTP API's `api_url`.
 - Archives are written as format 2, which carries source ranges. Format 1
-  archives still restore; older binaries reject format 2.
+  archives still restore.
 - Video fullscreen continues into the next track when it also has a saved
   video, including natural endings where the video stops just before its audio.
+
+### Fixed
+
+- Opening the selected track's YouTube link names that track when it has no
+  source link, and asks for a selection in the Library or Queue when nothing is
+  selected.
+
+### Upgrade notes
+
+- Protocol is now **14**, the database version **9**, and the archive format
+  **2**. Stop the running server with its current binary (`vtamp server stop`)
+  before upgrading, then start the new binary and reattach TUIs; the new server
+  migrates the database when it starts. Older binaries cannot open the migrated
+  database or restore format 2 archives. Update both ends of a relay or a
+  headless setup together.
+- The HTTP API is off unless the server starts with `--api`. It has no TLS or
+  authentication; bind it only to a private address such as a Tailscale one.
+- The iPhone app is not a release asset: build it from `ios/` with Xcode and
+  XcodeGen and install it with your own Apple ID ([ios/README.md](ios/README.md)).
+- Prebuilt downloads cover Apple Silicon macOS and ARM64 Linux tested on
+  Ubuntu 24.04 (glibc 2.39+). Linux remains a headless server without device
+  playback, relay, media keys, radio, or terminal video.
 
 ## [0.5.0] — 2026-10-06
 
@@ -359,7 +386,8 @@ easier and fixes live-radio media keys and slow LLM CLI startup.
   playback, relay, media keys, or radio. Intel Macs and other Linux architectures
   build from source.
 
-[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/rath/vtamp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rath/vtamp/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/rath/vtamp/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/rath/vtamp/compare/v0.4.1...v0.4.2

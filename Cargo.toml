@@ -1,6 +1,6 @@
 [package]
 name = "vtamp"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Jang-Ho Hwang <rath@xrath.com>"]
 homepage = "https://github.com/rath/vtamp"
 repository = "https://github.com/rath/vtamp"
