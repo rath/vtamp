@@ -347,14 +347,15 @@ instead of rewinding it.
 ## HTTP API (version 14)
 
 `vtamp server start --api ADDR` binds a plain HTTP/1.1 listener for apps on
-another machine of a private network. It works on device and headless servers, with or without a cast, and conflicts with
-`--remote`. `server_info` reports `api_url`, `http://ADDR/api`, built from the
-bound address: binding `0.0.0.0` reports `0.0.0.0`, so bind the address clients
-use, for example a Tailscale address. `server start` prints `api_url`, `doctor`
-shows it under `server`, and `server start --api` fails while a server without
-the API is running. Like the HTTP cast, the API has no TLS and no
-authentication; anyone who can reach the address can read the Library and
-control playback.
+another machine of a private network, such as the [iOS
+client](../ios/README.md). It works on device and headless servers, with or
+without a cast, and conflicts with `--remote`. `server_info` reports `api_url`,
+`http://ADDR/api`, built from the bound address: binding `0.0.0.0` reports
+`0.0.0.0`, so bind the address clients use, for example a Tailscale address.
+`server start` prints `api_url`, `doctor` shows it under `server`, and `server
+start --api` fails while a server without the API is running. Like the HTTP
+cast, the API has no TLS and no authentication; anyone who can reach the address
+can read the Library and control playback.
 
 | Route | Answer |
 | --- | --- |

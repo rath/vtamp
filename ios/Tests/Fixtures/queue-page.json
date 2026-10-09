@@ -1,0 +1,37 @@
+{
+  "version": 14,
+  "ok": true,
+  "data": {
+    "items": [
+      {
+        "id": "a54e8b19-2f32-4859-b78e-e7d2b7d9898e",
+        "track": {
+          "album": "",
+          "artist": "Unknown artist",
+          "cover": "/Users/me/music/Album/cover.png",
+          "duration_ms": 300,
+          "id": "a54e95e8-e928-4a61-9011-9a976418dc8e",
+          "path": "/Users/me/music/Album/Song.m4a",
+          "title": "Song",
+          "track_number": 0
+        }
+      },
+      {
+        "id": "e8514d4d-f4aa-4a3b-96da-18dc5a2ccee5",
+        "track": {
+          "album": "",
+          "artist": "Unknown artist",
+          "cover": "/Users/me/music/Album/cover.png",
+          "duration_ms": 300,
+          "id": "a54e95e8-e928-4a61-9011-9a976418dc8e",
+          "path": "/Users/me/music/Album/Song.m4a",
+          "title": "Song",
+          "track_number": 0
+        }
+      }
+    ],
+    "offset": 0,
+    "queue_revision": 2,
+    "total": 2
+  }
+}

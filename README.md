@@ -281,6 +281,10 @@ vtamp server start --headless --api 100.64.0.1:8700
 
 `server start --json` and `doctor --json` print `api_url`. The API has no TLS and no authentication: bind it to an address that only your own devices reach, such as a Tailscale address, never to a public interface. Binding `0.0.0.0` works, but the reported URL then shows `0.0.0.0`. Requests carry the same JSON as the local socket; commands that name paths on the server, `shutdown`, and subscriptions stay local. Audio and covers are chosen by Library track ID and support HTTP range requests. See [docs/protocol.md](docs/protocol.md#http-api-version-14).
 
+#### iPhone app
+
+[`ios/`](ios/README.md) holds a SwiftUI app for this API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. Radio channels and Ogg Vorbis files do not play on the iPhone. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps.
+
 ### Linux builds are headless servers
 
 On Linux the binary builds without an audio device backend, so every server it starts is headless and `server start` behaves like `server start --headless`. Device playback, the relay described below, and live radio are macOS features. AAC decodes in software there (macOS keeps AudioToolbox). Building needs a C compiler and cmake for the bundled libopus; nothing else, in particular no ALSA, is required. The build is tested on Ubuntu 24.04 (aarch64) and in CI, and each release attaches a prebuilt aarch64 build (see [Install](#linux-headless-server)); a typical setup is a headless server on a Linux machine with the music files and relays or `vtamp cast listen` on the Macs that play it.

@@ -1,0 +1,40 @@
+{
+  "version": 14,
+  "ok": true,
+  "data": {
+    "offset": 0,
+    "total": 3,
+    "tracks": [
+      {
+        "album": "",
+        "artist": "Unknown artist",
+        "cover": null,
+        "duration_ms": 300,
+        "id": "429f181d-7ac5-4153-ba0d-38501eeba84f",
+        "path": "/Users/me/music/Loose/Plain.wav",
+        "title": "Plain",
+        "track_number": 0
+      },
+      {
+        "album": "",
+        "artist": "Unknown artist",
+        "cover": "/Users/me/music/Album/cover.png",
+        "duration_ms": 300,
+        "id": "a54e95e8-e928-4a61-9011-9a976418dc8e",
+        "path": "/Users/me/music/Album/Song.m4a",
+        "title": "Song",
+        "track_number": 0
+      },
+      {
+        "album": "",
+        "artist": "",
+        "cover": null,
+        "duration_ms": null,
+        "id": "e18205cf-6992-45e3-b1ab-cbd91d3422ec",
+        "title": "Test FM",
+        "track_number": 0,
+        "url": "https://example.com/radio"
+      }
+    ]
+  }
+}

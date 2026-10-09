@@ -4,9 +4,12 @@ vtamp is a local music player: a persistent playback server with detachable
 terminal clients (virtual terminal + Winamp). Music must keep playing when a TUI
 exits or a tmux client detaches.
 
-- Single Rust crate, edition 2024, Rust 1.90 or newer; use `Cargo.lock`. TUI:
+- One Rust crate, edition 2024, Rust 1.90 or newer; use `Cargo.lock`. TUI:
   ratatui + crossterm; audio: rodio; transport: Unix sockets, plus opt-in plain
-  HTTP listeners for the cast and the app API; persistence: bundled SQLite. The website in `site/` is static HTML/CSS/JS without a build step.
+  HTTP listeners for the cast and the app API; persistence: bundled SQLite. The
+  website in `site/` is static HTML/CSS/JS without a build step. `ios/` is a
+  SwiftUI iPhone client of the HTTP API (iOS 18, Swift 6, XcodeGen); its Xcode
+  project is generated, never committed.
 - macOS is the supported platform for playback. Linux builds are headless servers
   only: no device playback, relay, media keys, or radio; AAC decodes in software
   there. CI covers both, and the Linux build is tested on Ubuntu 24.04 (aarch64).
@@ -47,6 +50,7 @@ Put new feature details in those documents, not here.
 | CLI and TUI | `src/cli.rs`, `src/main.rs`, `src/tui.rs`, `src/tui/` |
 | Artwork, themes, client settings | `src/artwork.rs`, `src/cover.rs`, `src/theme.rs`, `src/settings.rs` |
 | tmux status | `src/tmux.rs`, `vtamp.tmux`, `scripts/tmux-status.sh` |
+| iPhone client of the HTTP API | `ios/` (`ios/README.md`) |
 | Paths and instance isolation | `src/platform.rs` |
 | Icons, screenshots, live checks | `scripts/` |
 
@@ -80,6 +84,21 @@ without tmux; report skips as skips, not as live validation.
 - `tests/metadata_llm.rs` (`VTAMP_TEST_LLM_HOME` pointing at a directory with
   `llm.json`, run with `--ignored`) makes ten real model requests and consumes
   quota. Run it only when asked; fake-provider tests do not measure extraction quality.
+
+For `ios/` changes, generate the project and run the unit tests on a simulator
+(CI does not build the app):
+
+```sh
+xcodegen generate --spec ios/project.yml
+xcodebuild -project ios/Vtamp.xcodeproj -scheme Vtamp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
+  -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO test
+```
+
+The UI test is skipped without `TEST_RUNNER_VTAMP_UITEST_SERVER`; report that as
+a skip. Point it only at an isolated server (`ios/README.md`). Signing stays in
+the untracked `ios/Local.xcconfig`; never commit a team ID. A protocol version
+bump also changes `VtampClient.protocolVersion` and the app's fixtures.
 
 ## Protect the active listening session
 

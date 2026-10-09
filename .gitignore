@@ -7,3 +7,9 @@
 
 # Python capture tooling
 __pycache__/
+
+# iOS app: XcodeGen regenerates the project; signing and build output stay local
+/ios/*.xcodeproj
+/ios/Local.xcconfig
+/ios/DerivedData/
+xcuserdata/

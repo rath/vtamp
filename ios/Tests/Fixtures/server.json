@@ -1,0 +1,21 @@
+{
+  "version": 14,
+  "ok": true,
+  "data": {
+    "api_url": "http://127.0.0.1:56581/api",
+    "cast": {
+      "available": true,
+      "bitrate": 128000,
+      "channels": 2,
+      "codec": "opus",
+      "container": "ogg",
+      "listeners": 0,
+      "sample_rate": 48000,
+      "url": null
+    },
+    "import_available": true,
+    "mode": "headless",
+    "protocol_version": 14,
+    "version": "0.5.0"
+  }
+}

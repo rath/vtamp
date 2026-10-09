@@ -26,6 +26,11 @@
   Library track's files with range requests and validators. Commands that name
   server paths, `shutdown`, and subscriptions stay on the local socket. There is
   no TLS or authentication; bind a private address such as a Tailscale one.
+- An iPhone app in `ios/` for that API: it browses and searches the Library,
+  shows the server's Queue, starts YouTube imports with optional time ranges,
+  and plays Library files on the phone with its own queue, background audio,
+  and lock-screen controls. Built with Xcode and XcodeGen; installed with your
+  own Apple ID.
 
 ### Changed
 

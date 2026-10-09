@@ -1,0 +1,31 @@
+{
+  "version": 14,
+  "ok": true,
+  "data": {
+    "current": null,
+    "current_in_queue": false,
+    "duration_ms": 0,
+    "is_live": false,
+    "last_error": null,
+    "normalization": {
+      "applied_gain_db": null,
+      "enabled": true,
+      "failed": 0,
+      "pending": 0,
+      "ready": 0,
+      "target_lufs": -18.0,
+      "unmeasurable": 2
+    },
+    "position_ms": 0,
+    "queue_length": 2,
+    "queue_revision": 2,
+    "remaining_ms": 0,
+    "repeat": "off",
+    "revision": 7,
+    "scheduled_stop": null,
+    "shuffle": false,
+    "status": "stopped",
+    "stream_status": null,
+    "volume": 0
+  }
+}

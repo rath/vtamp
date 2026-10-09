@@ -1,0 +1,54 @@
+{
+  "version": 14,
+  "ok": true,
+  "data": [
+    {
+      "job_id": "7d0c8a52-3f7b-4a43-9c55-0f2b1e4d6a90",
+      "range": { "start_ms": 83000, "end_ms": 165000 },
+      "url": "https://www.youtube.com/watch?v=lO3lG-qXU14",
+      "title": "이승환 + 정준일 '어떻게 사랑이 그래요'",
+      "status": "running",
+      "stage": "processing_audio",
+      "total": 1,
+      "added": 0,
+      "updated": 0,
+      "video_failed": 0,
+      "skipped": 0,
+      "failed": 0,
+      "current_index": 0,
+      "current_title": "어떻게 사랑이 그래요",
+      "progress": {
+        "bytes": null,
+        "total": null,
+        "speed": null,
+        "eta": 12.5,
+        "processed_ms": 41000,
+        "processing_total_ms": 82000,
+        "processing_speed": 3.2
+      },
+      "started_at_ms": 1791561600000,
+      "finished_at_ms": null,
+      "error": null,
+      "revision": 6
+    },
+    {
+      "job_id": "1a2b3c4d-0000-4000-8000-000000000001",
+      "url": "https://www.youtube.com/playlist?list=PLtest",
+      "title": "Test playlist",
+      "status": "partial",
+      "stage": "partial",
+      "total": 3,
+      "added": 2,
+      "skipped": 0,
+      "failed": 1,
+      "first_added_track_id": "0f8e3b2a-5c1d-4e6f-9a7b-8c9d0e1f2a3b",
+      "current_index": null,
+      "current_title": null,
+      "progress": { "bytes": 4194304, "total": 4194304, "speed": null, "eta": null },
+      "started_at_ms": 1791561000000,
+      "finished_at_ms": 1791561090000,
+      "error": "1 item failed",
+      "revision": 14
+    }
+  ]
+}

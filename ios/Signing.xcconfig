@@ -1,0 +1,3 @@
+// Signing for a physical iPhone stays out of git: copy Local.xcconfig.example
+// to Local.xcconfig and set your team there. Simulator builds need neither.
+#include? "Local.xcconfig"

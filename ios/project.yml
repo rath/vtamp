@@ -1,0 +1,69 @@
+# XcodeGen spec: `xcodegen generate --spec ios/project.yml` writes ios/Vtamp.xcodeproj.
+name: Vtamp
+options:
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    "CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]": "NO"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Vtamp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios
+        PRODUCT_NAME: Vtamp
+        INFOPLIST_FILE: Sources/App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  VtampTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Vtamp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+  VtampUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Vtamp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xrath.vtamp.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Vtamp
+schemes:
+  Vtamp:
+    build:
+      targets:
+        Vtamp: all
+        VtampTests: [test]
+        VtampUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [VtampTests, VtampUITests]

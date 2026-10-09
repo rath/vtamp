@@ -1,0 +1,25 @@
+{
+  "id": "0f8e3b2a-5c1d-4e6f-9a7b-8c9d0e1f2a3b",
+  "path": "/Users/me/Library/Application Support/vtamp/imports/youtube/lO3lG-qXU14--83000-165000/audio.m4a",
+  "title": "어떻게 사랑이 그래요",
+  "artist": "이승환",
+  "album": "",
+  "track_number": 0,
+  "duration_ms": 82000,
+  "cover": "/Users/me/Library/Application Support/vtamp/imports/youtube/lO3lG-qXU14--83000-165000/cover.jpg",
+  "video": true,
+  "source": {
+    "provider": "youtube",
+    "video_id": "lO3lG-qXU14",
+    "range": { "start_ms": 83000, "end_ms": 165000 },
+    "video_url": "https://www.youtube.com/watch?v=lO3lG-qXU14",
+    "original_title": "이승환 + 정준일 '어떻게 사랑이 그래요'",
+    "channel_id": "UCtest",
+    "channel_name": "이승환 LEE SEUNG HWAN",
+    "channel_url": null,
+    "description": "",
+    "music_title": null,
+    "music_artist": null,
+    "music_album": null
+  }
+}
