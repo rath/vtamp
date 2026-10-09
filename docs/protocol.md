@@ -363,6 +363,7 @@ can read the Library and control playback.
 | `POST /api/rpc` | The body is a socket `Request` (`{"version":14,"request":{...}}`, at most 1 MiB); the answer is the socket `Reply`. |
 | `GET`/`HEAD /api/library/ID/audio` | The audio file of Library track `ID`. |
 | `GET`/`HEAD /api/library/ID/cover` | The cover image of Library track `ID`. |
+| `GET`/`HEAD /api/library/ID/video` | The saved silent video sidecar (`video.mkv`) of Library track `ID`, as stored. |
 
 `/api/rpc` answers `200` with `Content-Type: application/json` whenever the
 server produced a `Reply`, including `ok: false` and `version_mismatch`; clients
@@ -380,10 +381,14 @@ HTTP, files are chosen by track ID. There is no event stream yet; poll `now`,
 File routes look the track up with `library_track` and serve only the catalog's
 own path, never a path from the URL. `ID` must be a track ID; a missing track is
 `404 track_not_found`, a radio channel `404 not_a_file`, a track without art
-`404 cover_not_found`, and an unreadable file `404 file_not_found`. Responses
+`404 cover_not_found`, a track without a video sidecar `404 video_not_found`,
+and an unreadable file `404 file_not_found`. The video route was added within
+version 14, so a server from before it answers `404 not_found`; clients treat
+every `404` as "no video". Responses
 carry `Content-Length`, `Content-Type` from the extension (`audio/mp4` for m4a
 and mp4, `audio/mpeg`, `audio/flac`, `audio/wav`, `audio/aac`, `audio/ogg`,
-`image/jpeg`, `image/png`), `Accept-Ranges: bytes`, a strong `ETag` from the
+`image/jpeg`, `image/png`, `video/x-matroska`, `video/webm`),
+`Accept-Ranges: bytes`, a strong `ETag` from the
 size and modification time, `Last-Modified`, and `Cache-Control: private,
 no-cache`. A single `Range: bytes=` range answers `206` with `Content-Range`;
 one starting past the end answers `416` with `Content-Range: bytes */LENGTH`;

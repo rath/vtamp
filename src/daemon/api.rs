@@ -1,7 +1,7 @@
 //! A plain HTTP API for apps on a private network, served only with `--api`.
 //! `POST /api/rpc` carries the socket protocol's `Request` and `Reply` JSON
-//! unchanged; the file routes return a catalog track's audio or cover by
-//! track ID. Nothing from a URL reaches the filesystem, and commands that take
+//! unchanged; the file routes return a catalog track's audio, cover, or saved
+//! video by track ID. Nothing from a URL reaches the filesystem, and commands that take
 //! server paths or hold a connection open stay on the local socket. TLS and
 //! authentication belong to the network in front of it, as for the HTTP cast.
 mod body;
@@ -93,6 +93,7 @@ impl Api {
 enum Asset {
     Audio,
     Cover,
+    Video,
 }
 
 async fn route(context: &Context, request: http::Request<Incoming>) -> Response {
@@ -111,12 +112,12 @@ async fn route(context: &Context, request: http::Request<Incoming>) -> Response 
             Method::POST => rpc(context, request).await,
             _ => method_not_allowed("POST"),
         },
-        ["library", id, asset @ ("audio" | "cover")] if valid_id(id) => match method {
+        ["library", id, asset @ ("audio" | "cover" | "video")] if valid_id(id) => match method {
             Method::GET | Method::HEAD => {
-                let asset = if *asset == "audio" {
-                    Asset::Audio
-                } else {
-                    Asset::Cover
+                let asset = match *asset {
+                    "audio" => Asset::Audio,
+                    "cover" => Asset::Cover,
+                    _ => Asset::Video,
                 };
                 file(context, &request, id, asset).await
             }
@@ -265,6 +266,23 @@ async fn file(
                     StatusCode::NOT_FOUND,
                     "cover_not_found",
                     "This track has no cover",
+                );
+            }
+        },
+        Asset::Video => match crate::video::sidecar(&track) {
+            Some(video) => video,
+            None if track.playback.file().is_none() => {
+                return failure(
+                    StatusCode::NOT_FOUND,
+                    "not_a_file",
+                    "Radio channels have no file to download",
+                );
+            }
+            None => {
+                return failure(
+                    StatusCode::NOT_FOUND,
+                    "video_not_found",
+                    "This track has no saved video",
                 );
             }
         },

@@ -26,6 +26,9 @@
   Library track's files with range requests and validators. Commands that name
   server paths, `shutdown`, and subscriptions stay on the local socket. There is
   no TLS or authentication; bind a private address such as a Tailscale one.
+- `/api/library/ID/video` serves a track's saved silent video sidecar as the
+  Matroska file it is, with the same range requests and validators, so apps can
+  show the picture without the server re-encoding anything.
 - An iPhone app in `ios/` for that API: it browses and searches the Library,
   shows the server's Queue, starts YouTube imports with optional time ranges,
   and plays Library files on the phone with its own queue, background audio,

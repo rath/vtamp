@@ -992,8 +992,41 @@ fn http_api_serves_rpc_and_library_files() {
         music.join("b/Plain.wav"),
     )
     .unwrap();
+    // A managed import directory: the scan reads its manifest, and the silent
+    // video sidecar next to the audio file is what `/video` serves.
+    let managed = music.join("c/fixture0001");
+    std::fs::create_dir_all(&managed).unwrap();
+    std::fs::copy(fixture, managed.join("audio.m4a")).unwrap();
+    let clip_fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/video-h264.mkv");
+    std::fs::copy(clip_fixture, managed.join("video.mkv")).unwrap();
+    let clip_id = "0f1a2b3c-0000-4000-8000-000000000001";
+    std::fs::write(
+        managed.join("source.json"),
+        serde_json::to_vec_pretty(&json!({
+            "track_id": clip_id,
+            "source": {
+                "provider": "youtube",
+                "video_id": "fixture0001",
+                "video_url": "https://www.youtube.com/watch?v=fixture0001",
+                "original_title": "Clip",
+                "channel_id": null,
+                "channel_name": null,
+                "channel_url": null,
+                "description": "",
+                "music_title": null,
+                "music_artist": null,
+                "music_album": null
+            },
+            "metadata": {"title": "Clip", "artist": "Fixture", "method": "fixture", "warning": null},
+            "title_override": null,
+            "artist_override": null
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let audio = std::fs::read(fixture).unwrap();
     let cover = std::fs::read(music.join("a/cover.jpg")).unwrap();
+    let clip = std::fs::read(clip_fixture).unwrap();
     let len = audio.len();
 
     let started = server.ok(&["server", "start", "--headless", "--api", "127.0.0.1:0"]);
@@ -1022,7 +1055,15 @@ fn http_api_serves_rpc_and_library_files() {
             .unwrap()
             .to_owned()
     };
-    let (song, plain) = (id(".m4a"), id(".wav"));
+    let (song, plain) = (id("Song.m4a"), id(".wav"));
+    assert_eq!(id("audio.m4a"), clip_id, "the manifest names the track");
+    let listed_clip = tracks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["id"] == clip_id)
+        .unwrap();
+    assert_eq!(listed_clip["video"], true, "{listed_clip}");
 
     let reply = http(host, "GET", "/api/server", &[], b"");
     assert_eq!(reply.status, 200);
@@ -1052,7 +1093,7 @@ fn http_api_serves_rpc_and_library_files() {
         {"command":"library_list","query":"","offset":0,"limit":10}}));
     assert_eq!(status, 200);
     assert_eq!(listed["ok"], true);
-    assert_eq!(listed["data"]["total"], 2);
+    assert_eq!(listed["data"]["total"], 3);
     let (status, stale) = rpc(json!({"version": 1, "request": {"command":"status"}}));
     assert_eq!(status, 200);
     assert_eq!(stale["error"]["code"], "version_mismatch");
@@ -1135,6 +1176,25 @@ fn http_api_serves_rpc_and_library_files() {
         b"",
     );
     assert_eq!(bare.status, 404);
+
+    let path = format!("/api/library/{clip_id}/video");
+    let video = http(host, "GET", &path, &[], b"");
+    assert_eq!(video.status, 200);
+    assert_eq!(video.headers["content-type"], "video/x-matroska");
+    assert_eq!(video.headers["accept-ranges"], "bytes");
+    assert_eq!(video.headers["content-length"], clip.len().to_string());
+    assert_eq!(video.body, clip);
+    let head = http(host, "HEAD", &path, &[], b"");
+    assert_eq!(head.status, 200);
+    assert_eq!(head.headers["content-length"], clip.len().to_string());
+    assert!(head.body.is_empty(), "HEAD sends no body");
+    let part = http(host, "GET", &path, &[("Range", "bytes=0-15")], b"");
+    assert_eq!(part.status, 206);
+    assert_eq!(part.body, clip[..16]);
+    let none = http(host, "GET", &format!("/api/library/{song}/video"), &[], b"");
+    assert_eq!(none.status, 404);
+    let none: Value = serde_json::from_slice(&none.body).unwrap();
+    assert_eq!(none["error"]["code"], "video_not_found");
     assert_eq!(http(host, "GET", "/api/nothing", &[], b"").status, 404);
     assert_eq!(http(host, "GET", "/cast/anything", &[], b"").status, 404);
     assert_eq!(http(host, "DELETE", "/api/server", &[], b"").status, 405);

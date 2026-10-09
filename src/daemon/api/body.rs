@@ -26,6 +26,8 @@ pub fn content_type(path: &Path) -> &'static str {
         Some("ogg") => "audio/ogg",
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
+        Some("mkv") => "video/x-matroska",
+        Some("webm") => "video/webm",
         _ => "application/octet-stream",
     }
 }
@@ -106,6 +108,8 @@ mod tests {
         assert_eq!(content_type(Path::new("/a/x.flac")), "audio/flac");
         assert_eq!(content_type(Path::new("/a/cover.JPG")), "image/jpeg");
         assert_eq!(content_type(Path::new("/a/1.png")), "image/png");
+        assert_eq!(content_type(Path::new("/a/video.mkv")), "video/x-matroska");
+        assert_eq!(content_type(Path::new("/a/clip.webm")), "video/webm");
         assert_eq!(
             content_type(Path::new("/a/README")),
             "application/octet-stream"
