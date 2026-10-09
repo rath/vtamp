@@ -195,6 +195,7 @@ struct NowPlayingView: View {
             Text(player.current?.title ?? "Not Playing")
                 .font(.title3.weight(.semibold))
                 .lineLimit(1)
+                .accessibilityIdentifier("nowPlayingTitle")
             if let subtitle = player.current?.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.body)

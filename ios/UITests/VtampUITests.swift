@@ -83,6 +83,9 @@ final class VtampUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["VTAMP_SERVER"] = server
         app.launchEnvironment["VTAMP_MUTED"] = "1"
+        // The Cover / Video choice persists; start from Video whatever an
+        // earlier run left behind.
+        app.launchArguments += ["-showVideo", "YES"]
         app.launch()
 
         let title = ProcessInfo.processInfo.environment["VTAMP_UITEST_VIDEO_TRACK"] ?? "Clip"
@@ -117,6 +120,13 @@ final class VtampUITests: XCTestCase {
         toggle.tap()
         XCTAssertTrue(video.waitForNonExistence(timeout: 5), "The cover replaces the video")
         XCTAssertEqual(toggle.label, "Video")
+        // A cover wider than the sheet must not widen it: the header and the
+        // title stay on screen, so the switch back to the video stays reachable.
+        for element in [toggle, app.buttons["Close"], app.staticTexts["nowPlayingTitle"]] {
+            XCTAssertTrue(element.isHittable, "\(element.label) is on screen with the cover")
+            XCTAssertTrue(app.frame.contains(element.frame), "\(element.label) lies inside the screen")
+        }
+        snapshot(app, "video-cover")
         toggle.tap()
         XCTAssertTrue(video.waitForExistence(timeout: 20), "The video comes back")
 

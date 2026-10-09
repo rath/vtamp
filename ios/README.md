@@ -139,8 +139,9 @@ VTAMP_HOME="$vtamp_test_home" target/release/vtamp server start --headless --api
 # For the video step, add a managed import directory with a sidecar: a folder
 # named after an eleven-character video ID holding audio.m4a, video.mkv (for
 # example tests/fixtures/video-h264.mkv), and a source.json manifest whose
-# metadata title is Clip; the scan registers it with video: true. The step is
-# skipped when no Clip exists.
+# metadata title is Clip; the scan registers it with video: true. A cover.jpg
+# wider than the phone's screen next to it checks the cover's layout too. The
+# step is skipped when no Clip exists.
 TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
   -project ios/Vtamp.xcodeproj -scheme Vtamp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
