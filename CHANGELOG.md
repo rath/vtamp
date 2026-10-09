@@ -66,6 +66,9 @@ take time ranges, and the Library filters by kind.
 
 ### Fixed
 
+- On Linux, `server start` with `--cast`, `--cast-http`, or `--api` but without
+  `--headless` started the server and then failed with a mode conflict. These
+  options now start a headless server there, as `server start` alone does.
 - Opening the selected track's YouTube link names that track when it has no
   source link, and asks for a selection in the Library or Queue when nothing is
   selected.

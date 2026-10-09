@@ -872,7 +872,9 @@ pub async fn run(args: Args) -> Result<()> {
             };
             let launch = match remote {
                 Some(remote) => Launch::Relay(std::path::absolute(remote)?),
-                None if headless => Launch::Headless {
+                // Without device playback every server is headless; asking for a
+                // device server would fail the mode check below.
+                None if headless || !cfg!(target_os = "macos") => Launch::Headless {
                     http: cast_http,
                     api,
                 },

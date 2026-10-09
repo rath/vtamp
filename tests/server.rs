@@ -860,6 +860,19 @@ fn device_servers_cast_only_when_asked() {
     assert_eq!(server.ok(&["server", "start", "--cast"])["mode"], "device");
 }
 
+/// Builds without device playback start every server headless, so the cast
+/// and API options need no `--headless`.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn server_start_options_imply_headless_without_device_playback() {
+    let server = Server::new();
+    let started = server.ok(&["server", "start", "--api", "127.0.0.1:0"]);
+    assert_eq!(started["mode"], "headless");
+    assert!(started["api_url"].as_str().is_some(), "{started}");
+    assert_eq!(server.ok(&["server", "start"])["mode"], "headless");
+    assert_eq!(server.ok(&["server", "start", "--cast"])["cast"], true);
+}
+
 #[test]
 fn http_cast_serves_the_token_path_and_rejects_others() {
     use std::{io::BufRead, net::TcpStream};
