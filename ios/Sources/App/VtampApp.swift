@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct VtampApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var app: AppModel
     @State private var player: Player
     @State private var imports: ImportsModel

@@ -33,6 +33,9 @@ such as `music-box.tailnet.ts.net:8700` work too.
 | Import | A YouTube URL, an optional Start and End (seconds, `M:SS`, or `H:MM:SS`), and the whole playlist when the URL names one. The server runs yt-dlp; progress, Cancel, Retry, and Play for finished jobs follow. Shown only when the server has yt-dlp. |
 | Settings | The server address and what the server reports about itself. The address is the only thing the app saves. |
 
+Tapping the bar above the tabs opens the player: the cover (or the saved
+video) over the cover's blurred colors, the title, the position slider,
+previous, play or pause, and next, the output volume, and an AirPlay button.
 Playback continues in the background with lock-screen and Control Center
 controls, headphone buttons, and artwork. Unplugging headphones pauses, and a
 phone call pauses and resumes. Audio is fetched with HTTP range requests, so
@@ -49,9 +52,13 @@ decoder, so nothing is re-encoded or remuxed. AV1 needs an iPhone 15 Pro or
 later; on other phones the cover stays with a notice. VP9 sidecars decode in
 software through libvpx when the app is built with it (see [VP9 with
 libvpx](#vp9-with-libvpx)); without that build they show the cover and a notice.
-Video decodes only while the sheet is on screen and the app is in the
-foreground; the audio is never affected by a video that cannot be shown. The
-app stays in portrait.
+Tapping the picture, or its corner button, shows it over the whole screen and
+turns the phone to landscape; a tap shows the controls, and the **X** returns
+to the portrait player. Video decodes only while the player or the full-screen
+view is on screen and the app is in the foreground: closing the sheet, locking
+the phone, or switching apps stops the demuxer, the decoder, and the video
+downloads, and the audio is never affected by a video that cannot be shown.
+Outside the full-screen video the app stays in portrait.
 
 Not on the iPhone: radio channels and Ogg Vorbis files (they appear greyed
 out), the server's loudness normalization, shuffle and repeat, and controlling
@@ -156,7 +163,7 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/Model` | Library, Queue, and import types; time parsing |
 | `Sources/Player` | Queue and transport, AVPlayer engine, audio session, lock-screen controls, artwork cache |
 | `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the renderer that follows the audio clock |
-| `Sources/Views` | Library, Queue, Now Playing (with the video surface), Import, Settings |
+| `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 
 The app icon is generated from `assets/icon.png` by `scripts/build-icons.py`.

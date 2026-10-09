@@ -37,8 +37,9 @@
 - The iPhone app shows a track's saved video in the player, in step with the
   audio: it demuxes the server's Matroska sidecar itself and hands the stored
   AV1, H.264, or HEVC samples to the phone's decoder, so nothing is re-encoded.
-  A Cover / Video button keeps the choice. VP9 sidecars decode in software with
-  libvpx when the app is built with it.
+  A Cover / Video button keeps the choice, and the picture opens over the
+  whole screen in landscape. VP9 sidecars decode in software with libvpx when
+  the app is built with it.
 
 ### Changed
 

@@ -1,7 +1,8 @@
 import AVFoundation
 import SwiftUI
 
-/// Hosts the renderer's display layer; the layer has one home at a time.
+/// Hosts the renderer's display layer. The layer has one home at a time: the
+/// player sheet or the full-screen view, whichever attached last.
 struct VideoSurface: UIViewRepresentable {
     let layer: AVSampleBufferDisplayLayer
 
@@ -22,11 +23,15 @@ struct VideoSurface: UIViewRepresentable {
     final class LayerHost: UIView {
         private var hosted: CALayer?
 
+        /// Take the layer, even from another host. `nil` lets go of it, but
+        /// only while no other host has taken it since.
         func attach(_ layer: CALayer?) {
-            guard hosted !== layer else { return }
-            hosted?.removeFromSuperlayer()
+            if let hosted, hosted !== layer, hosted.superlayer === self.layer {
+                hosted.removeFromSuperlayer()
+            }
             hosted = layer
-            if let layer {
+            if let layer, layer.superlayer !== self.layer {
+                layer.removeFromSuperlayer()
                 self.layer.addSublayer(layer)
             }
             setNeedsLayout()
@@ -34,9 +39,10 @@ struct VideoSurface: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
+            guard let hosted, hosted.superlayer === layer else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            hosted?.frame = bounds
+            hosted.frame = bounds
             CATransaction.commit()
         }
     }

@@ -48,7 +48,7 @@ final class VtampUITests: XCTestCase {
         XCTAssertTrue(position.waitForExistence(timeout: 5))
         let after = try seconds(position)
         XCTAssertGreaterThanOrEqual(after - before, 5, "Position \(before) s before, \(after) s after the background")
-        app.buttons["Done"].tap()
+        app.buttons["Close"].tap()
 
         // Queue: the phone's own list, then the server's Queue loaded onto the phone.
         tab(app, "Queue").tap()
@@ -104,12 +104,12 @@ final class VtampUITests: XCTestCase {
         app.buttons["Now Playing: \(title)"].firstMatch.tap()
         let video = app.descendants(matching: .any)["video"].firstMatch
         XCTAssertTrue(video.waitForExistence(timeout: 20), "The saved video shows in the player")
-        let framed = expectation(for: NSPredicate { element, _ in
+        let framed = NSPredicate { element, _ in
             guard let value = (element as? XCUIElement)?.value as? String,
                   let frames = Int(value.split(separator: " ").first ?? "") else { return false }
             return frames > 0
-        }, evaluatedWith: video)
-        wait(for: [framed], timeout: 20)
+        }
+        wait(for: [expectation(for: framed, evaluatedWith: video)], timeout: 20)
         snapshot(app, "video")
 
         let toggle = app.buttons["videoSwitch"]
@@ -119,7 +119,26 @@ final class VtampUITests: XCTestCase {
         XCTAssertEqual(toggle.label, "Video")
         toggle.tap()
         XCTAssertTrue(video.waitForExistence(timeout: 20), "The video comes back")
-        app.buttons["Done"].tap()
+
+        // Full screen: the same picture over the whole (landscape) screen, and
+        // back; the controls hide while playing, so a tap may be needed first.
+        app.buttons["fullscreen"].tap()
+        let full = app.descendants(matching: .any)["fullscreenVideo"].firstMatch
+        XCTAssertTrue(full.waitForExistence(timeout: 10), "The video fills the screen")
+        wait(for: [expectation(for: framed, evaluatedWith: full)], timeout: 20)
+        let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
+        wait(for: [expectation(for: landscape, evaluatedWith: NSNull())], timeout: 5)
+        snapshot(app, "video-fullscreen")
+        let exit = app.buttons["Exit fullscreen"]
+        if !exit.waitForExistence(timeout: 1) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(exit.waitForExistence(timeout: 5))
+        exit.tap()
+        XCTAssertTrue(video.waitForExistence(timeout: 10), "The video returns to the player")
+        let portrait = NSPredicate { _, _ in app.frame.width < app.frame.height }
+        wait(for: [expectation(for: portrait, evaluatedWith: NSNull())], timeout: 5)
+        app.buttons["Close"].tap()
     }
 
     /// The slider's `m:ss` value in seconds.

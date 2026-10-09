@@ -72,9 +72,21 @@ final class VideoRenderer: VideoSink {
             update()
         }
     }
-    /// The Now Playing sheet is on screen; nothing decodes otherwise.
-    var wanted = false {
-        didSet { update() }
+    /// Where the picture can show. Nothing decodes while this is empty.
+    enum Surface: Hashable {
+        case sheet, fullscreen
+    }
+
+    /// The surfaces on screen; the sheet and the full-screen view each add and
+    /// remove themselves, in whichever order SwiftUI calls them.
+    private(set) var surfaces: Set<Surface> = []
+    /// Something on screen can show the picture.
+    var wanted: Bool { !surfaces.isEmpty }
+
+    func show(_ surface: Surface, _ visible: Bool) {
+        let before = wanted
+        if visible { surfaces.insert(surface) } else { surfaces.remove(surface) }
+        if wanted != before { update() }
     }
 
     @ObservationIgnored let layer = AVSampleBufferDisplayLayer()
