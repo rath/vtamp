@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// What a catalog row is: a local audio file, a file with a managed silent
 /// video sidecar, or a registered radio stream. Every row has exactly one kind.
@@ -409,6 +409,9 @@ pub struct ServerInfo {
     pub mode: ServerMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<PathBuf>,
+    /// Base URL of the HTTP API, when the server was started with --api.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_url: Option<String>,
     pub version: String,
 }
 

@@ -20,14 +20,21 @@
   is kept and boundaries fall on nearby source keyframes rather than exact
   frames. Imports show FFmpeg's progress while copying: media time copied,
   percentage, processing speed, and estimated time remaining.
+- `server start --api ADDR` serves a JSON API for apps over plain HTTP:
+  `POST /api/rpc` takes the local socket's request JSON, `GET /api/server`
+  describes the server, and `/api/library/ID/audio` and `/cover` return a
+  Library track's files with range requests and validators. Commands that name
+  server paths, `shutdown`, and subscriptions stay on the local socket. There is
+  no TLS or authentication; bind a private address such as a Tailscale one.
 
 ### Changed
 
-- Protocol 13 and database version 9: the catalog stores a `kind` column,
+- Protocol 14 and database version 9: the catalog stores a `kind` column,
   backfilled from existing sidecars in the catalog and the saved queue, and
   imports are identified by video ID plus normalized range instead of video ID
-  alone. Track IDs, metadata, queue, and sessions are preserved. Restart the
-  server after upgrading; older binaries reject the new database.
+  alone. Track IDs, metadata, queue, and sessions are preserved. `server_info`
+  reports the HTTP API's `api_url`. Restart the server after upgrading; older
+  binaries reject the new database.
 - Archives are written as format 2, which carries source ranges. Format 1
   archives still restore; older binaries reject format 2.
 - Video fullscreen continues into the next track when it also has a saved

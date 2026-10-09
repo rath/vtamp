@@ -931,6 +931,219 @@ fn http_cast_serves_the_token_path_and_rejects_others() {
     assert_eq!(server.ok(&["cast", "status"])["listeners"], 0);
 }
 
+/// One HTTP/1.1 exchange on a fresh connection: status, lowercase headers, body.
+struct HttpReply {
+    status: u16,
+    headers: std::collections::HashMap<String, String>,
+    body: Vec<u8>,
+}
+fn http(host: &str, method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> HttpReply {
+    use std::io::BufRead;
+    let mut stream = std::net::TcpStream::connect(host).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    if method == "POST" {
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut reader = std::io::BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let status = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let mut headers = std::collections::HashMap::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" || line.is_empty() {
+            break;
+        }
+        let (name, value) = line.split_once(':').unwrap();
+        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
+    }
+    let mut body = vec![];
+    reader.read_to_end(&mut body).unwrap();
+    HttpReply {
+        status,
+        headers,
+        body,
+    }
+}
+
+#[test]
+fn http_api_serves_rpc_and_library_files() {
+    let server = Server::new();
+    let music = server.home.path().join("music");
+    std::fs::create_dir_all(music.join("a")).unwrap();
+    std::fs::create_dir_all(music.join("b")).unwrap();
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stereo-aac.m4a");
+    std::fs::copy(fixture, music.join("a/Song.m4a")).unwrap();
+    image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40]))
+        .save(music.join("a/cover.jpg"))
+        .unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stereo.wav"),
+        music.join("b/Plain.wav"),
+    )
+    .unwrap();
+    let audio = std::fs::read(fixture).unwrap();
+    let cover = std::fs::read(music.join("a/cover.jpg")).unwrap();
+    let len = audio.len();
+
+    let started = server.ok(&["server", "start", "--headless", "--api", "127.0.0.1:0"]);
+    let url = started["api_url"].as_str().unwrap().to_owned();
+    assert_eq!(
+        server.ok(&["server", "start", "--headless"])["api_url"],
+        url
+    );
+    assert_eq!(server.ok(&["doctor"])["server"]["api_url"], url);
+    let host = url
+        .strip_prefix("http://")
+        .and_then(|rest| rest.strip_suffix("/api"))
+        .unwrap()
+        .to_owned();
+    let host = host.as_str();
+    server.ok(&["library", "add", music.to_str().unwrap(), "--wait"]);
+    let tracks = server.ok(&["library", "list"])["tracks"].clone();
+    let id = |extension: &str| -> String {
+        tracks
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|track| track["path"].as_str().unwrap().ends_with(extension))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (song, plain) = (id(".m4a"), id(".wav"));
+
+    let reply = http(host, "GET", "/api/server", &[], b"");
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.headers["content-type"], "application/json");
+    let info: Value = serde_json::from_slice(&reply.body).unwrap();
+    assert_eq!(info["data"]["mode"], "headless");
+    assert_eq!(info["data"]["api_url"], url);
+    assert_eq!(
+        info["data"]["protocol_version"],
+        vtamp::model::PROTOCOL_VERSION
+    );
+    // Depends on whether this machine has yt-dlp on PATH.
+    assert!(info["data"]["import_available"].is_boolean());
+
+    let rpc = |request: Value| -> (u16, Value) {
+        let reply = http(
+            host,
+            "POST",
+            "/api/rpc",
+            &[("Content-Type", "application/json")],
+            &serde_json::to_vec(&request).unwrap(),
+        );
+        (reply.status, serde_json::from_slice(&reply.body).unwrap())
+    };
+    let version = vtamp::model::PROTOCOL_VERSION;
+    let (status, listed) = rpc(json!({"version": version, "request":
+        {"command":"library_list","query":"","offset":0,"limit":10}}));
+    assert_eq!(status, 200);
+    assert_eq!(listed["ok"], true);
+    assert_eq!(listed["data"]["total"], 2);
+    let (status, stale) = rpc(json!({"version": 1, "request": {"command":"status"}}));
+    assert_eq!(status, 200);
+    assert_eq!(stale["error"]["code"], "version_mismatch");
+    let (_, denied) = rpc(json!({"version": version, "request": {"command":"shutdown"}}));
+    assert_eq!(denied["error"]["code"], "not_available_over_http");
+    let (_, denied) = rpc(json!({"version": version, "request":
+        {"command":"queue_add","paths":[fixture],"track":null}}));
+    assert_eq!(denied["error"]["code"], "not_available_over_http");
+    let revision = server.ok(&["status"])["revision"].clone();
+    let (_, info) = rpc(json!({"version": version, "request": {"command":"server_info"}}));
+    assert_eq!(info["data"]["api_url"], url);
+    let (_, queued) = rpc(json!({"version": version, "request":
+        {"command":"queue_add","paths":[],"track": song}}));
+    assert_eq!(queued["ok"], true, "{queued}");
+    let after = server.ok(&["status"]);
+    assert_eq!(after["queue"].as_array().unwrap().len(), 1);
+    assert_ne!(after["revision"], revision, "the queue edit is a mutation");
+    assert!(after["last_error"].is_null(), "{after}");
+    let reply = http(host, "POST", "/api/rpc", &[], b"{not json");
+    assert_eq!(reply.status, 400);
+    let reply = http(host, "GET", "/api/rpc", &[], b"");
+    assert_eq!(reply.status, 405);
+    assert_eq!(reply.headers["allow"], "POST");
+
+    let path = format!("/api/library/{song}/audio");
+    let full = http(host, "GET", &path, &[], b"");
+    assert_eq!(full.status, 200);
+    assert_eq!(full.headers["content-type"], "audio/mp4");
+    assert_eq!(full.headers["accept-ranges"], "bytes");
+    assert_eq!(full.headers["content-length"], len.to_string());
+    assert_eq!(full.body, audio);
+    let etag = full.headers["etag"].clone();
+    assert!(full.headers.contains_key("last-modified"));
+    let part = http(host, "GET", &path, &[("Range", "bytes=100-199")], b"");
+    assert_eq!(part.status, 206);
+    assert_eq!(
+        part.headers["content-range"],
+        format!("bytes 100-199/{len}")
+    );
+    assert_eq!(part.body, audio[100..200]);
+    let tail = http(host, "GET", &path, &[("Range", "bytes=-16")], b"");
+    assert_eq!(tail.status, 206);
+    assert_eq!(tail.body, audio[len - 16..]);
+    let past = http(host, "GET", &path, &[("Range", "bytes=999999-")], b"");
+    assert_eq!(past.status, 416);
+    assert_eq!(past.headers["content-range"], format!("bytes */{len}"));
+    let multiple = http(host, "GET", &path, &[("Range", "bytes=0-1,3-4")], b"");
+    assert_eq!(multiple.status, 200);
+    assert_eq!(multiple.body.len(), len);
+    let head = http(host, "HEAD", &path, &[], b"");
+    assert_eq!(head.status, 200);
+    assert_eq!(head.headers["content-length"], len.to_string());
+    assert!(head.body.is_empty(), "HEAD sends no body");
+    let cached = http(host, "GET", &path, &[("If-None-Match", &etag)], b"");
+    assert_eq!(cached.status, 304);
+    assert!(cached.body.is_empty());
+    let stale = http(
+        host,
+        "GET",
+        &path,
+        &[("Range", "bytes=0-9"), ("If-Range", "\"stale\"")],
+        b"",
+    );
+    assert_eq!(stale.status, 200);
+    assert_eq!(stale.body.len(), len);
+    let unknown = http(host, "GET", "/api/library/0000/audio", &[], b"");
+    assert_eq!(unknown.status, 404);
+    let unknown: Value = serde_json::from_slice(&unknown.body).unwrap();
+    assert_eq!(unknown["error"]["code"], "track_not_found");
+
+    let art = http(host, "GET", &format!("/api/library/{song}/cover"), &[], b"");
+    assert_eq!(art.status, 200);
+    assert_eq!(art.headers["content-type"], "image/jpeg");
+    assert_eq!(art.body, cover);
+    let bare = http(
+        host,
+        "GET",
+        &format!("/api/library/{plain}/cover"),
+        &[],
+        b"",
+    );
+    assert_eq!(bare.status, 404);
+    assert_eq!(http(host, "GET", "/api/nothing", &[], b"").status, 404);
+    assert_eq!(http(host, "GET", "/cast/anything", &[], b"").status, 404);
+    assert_eq!(http(host, "DELETE", "/api/server", &[], b"").status, 405);
+    assert_eq!(
+        http(host, "GET", "/api/library/a..b/audio", &[], b"").status,
+        404
+    );
+}
+
 #[test]
 fn normalization_is_automatic_persistent_and_only_changes_on_next_playback() {
     let server = Server::new();

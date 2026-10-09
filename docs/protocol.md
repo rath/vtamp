@@ -1,4 +1,4 @@
-# Local protocol, version 13
+# Local protocol, version 14
 
 The CLI is the recommended automation interface. These details are for contributors building another local client.
 
@@ -7,13 +7,13 @@ The CLI is the recommended automation interface. These details are for contribut
 Connect to the per-user Unix socket printed by `vtamp doctor --json`. Send a four-byte unsigned **big-endian** byte count, followed by that many bytes of UTF-8 JSON. The limit is 16 MiB in either direction. A normal connection handles one request and one reply, then closes. Request reads and reply writes have deadlines; an idle or slow client cannot block playback.
 
 ```json
-{"version":13,"request":{"command":"pause"}}
+{"version":14,"request":{"command":"pause"}}
 ```
 
 The `Command`, `Request`, `Reply`, `State`, and `Event` types in `src/model.rs` are the source of truth for field names. Commands are internally tagged with `command` in snake_case. Paths supplied by clients must be absolute; the CLI resolves relative paths before sending them. The server's working directory is not the invoking shell's directory.
 
 ```json
-{"version":13,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
+{"version":14,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
 ```
 
 A version mismatch is rejected before dispatch. There is no TCP listener and no network discovery. Socket permissions restrict clients to the same OS user.
@@ -60,14 +60,14 @@ At most four direct imports and one catalog scan run at a time. There are bounde
 
 ## Watch
 
-Send `{"version":13,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
+Send `{"version":14,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
 
 ```json
-{"version":13,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
+{"version":14,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
 ```
 
 ```json
-{"version":13,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
+{"version":14,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
 ```
 
 `library_changed` and `shutdown` have no data payload. Watch subscriptions are established before the initial snapshot is taken. A client should ignore queued state events with revisions lower than its most recent snapshot and progress events whose revision does not match its current state. On event-buffer lag, the server obtains and emits a new snapshot. Reconnect after a dropped stream and replace local state from the new snapshot; never infer the server's lifetime from one UI connection.
@@ -76,7 +76,7 @@ The CLI's NDJSON watch output normalizes the first snapshot into a `state` event
 
 ## Spectrum subscription
 
-Send `{"version":13,"request":{"command":"spectrum_watch"}}` on a separate
+Send `{"version":14,"request":{"command":"spectrum_watch"}}` on a separate
 connection. The first and subsequent replies contain a `SpectrumFrame` directly
 in `data`, not a `State` or `Event`. Fields are `generation`, nullable `current_id`,
 `active`, `low_hz`, `high_hz`, and `levels` (32 finite values in 0–1). An initial
@@ -267,11 +267,11 @@ rules: one per track start, seek, and resume, silence while paused or after a
 track ends, an end-of-stream page on stop. Radio playback is not cast. Without
 `--cast` a device server has no cast at all.
 
-Send `{"version":13,"request":{"command":"cast_watch"}}` on a separate connection.
+Send `{"version":14,"request":{"command":"cast_watch"}}` on a separate connection.
 The first reply is a success envelope whose `data` is a `CastInfo`:
 
 ```json
-{"version":13,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
+{"version":14,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
 ```
 
 After that reply the connection carries raw Ogg pages without length prefixes,
@@ -317,7 +317,7 @@ TLS and no other authentication exist in vtamp; the address defaults to nothing,
 so the listener exists only when asked, and a reverse proxy or private network
 provides the rest.
 
-`server_info` describes any server: `{"mode":"device"|"headless"|"relay","remote":<socket path, relays only>,"version":"0.1.0"}`.
+`server_info` describes any server: `{"mode":"device"|"headless"|"relay","remote":<socket path, relays only>,"api_url":<servers started with --api only>,"version":"0.1.0"}`.
 
 ### Relay
 
@@ -343,6 +343,55 @@ before it is audible by the buffered amount, about a second. Media controls on
 the relay machine send their commands to the remote server. A lost local output
 device, or audio that cannot be played, makes the relay rejoin the live cast
 instead of rewinding it.
+
+## HTTP API (version 14)
+
+`vtamp server start --api ADDR` binds a plain HTTP/1.1 listener for apps on
+another machine of a private network. It works on device and headless servers, with or without a cast, and conflicts with
+`--remote`. `server_info` reports `api_url`, `http://ADDR/api`, built from the
+bound address: binding `0.0.0.0` reports `0.0.0.0`, so bind the address clients
+use, for example a Tailscale address. `server start` prints `api_url`, `doctor`
+shows it under `server`, and `server start --api` fails while a server without
+the API is running. Like the HTTP cast, the API has no TLS and no
+authentication; anyone who can reach the address can read the Library and
+control playback.
+
+| Route | Answer |
+| --- | --- |
+| `GET /api/server` | Envelope whose `data` is `server_info` plus `protocol_version`, `import_available`, and `cast` (`CastInfo`). |
+| `POST /api/rpc` | The body is a socket `Request` (`{"version":14,"request":{...}}`, at most 1 MiB); the answer is the socket `Reply`. |
+| `GET`/`HEAD /api/library/ID/audio` | The audio file of Library track `ID`. |
+| `GET`/`HEAD /api/library/ID/cover` | The cover image of Library track `ID`. |
+
+`/api/rpc` answers `200` with `Content-Type: application/json` whenever the
+server produced a `Reply`, including `ok: false` and `version_mismatch`; clients
+read `ok` and `error.code` exactly as on the socket. A body that is not a
+`Request` gets `400 invalid_request`, an oversized one `413`. `server_info` and
+`cast_info` are answered by the listener; every other command goes through the
+same queue, timeout, and replies as a socket request. Commands that hold a
+connection open (`watch`, `spectrum_watch`, `cast_watch`), `shutdown`, and
+commands that name server paths (`library_add`, `library_remove`,
+`archive_import`, `stream_preview`, `play_direct` with `path`, and `play` or
+`queue_add` with non-empty `paths`) fail with `not_available_over_http`: over
+HTTP, files are chosen by track ID. There is no event stream yet; poll `now`,
+`queue_page`, or `imports`.
+
+File routes look the track up with `library_track` and serve only the catalog's
+own path, never a path from the URL. `ID` must be a track ID; a missing track is
+`404 track_not_found`, a radio channel `404 not_a_file`, a track without art
+`404 cover_not_found`, and an unreadable file `404 file_not_found`. Responses
+carry `Content-Length`, `Content-Type` from the extension (`audio/mp4` for m4a
+and mp4, `audio/mpeg`, `audio/flac`, `audio/wav`, `audio/aac`, `audio/ogg`,
+`image/jpeg`, `image/png`), `Accept-Ranges: bytes`, a strong `ETag` from the
+size and modification time, `Last-Modified`, and `Cache-Control: private,
+no-cache`. A single `Range: bytes=` range answers `206` with `Content-Range`;
+one starting past the end answers `416` with `Content-Range: bytes */LENGTH`;
+several ranges or an invalid header answer the whole file. A matching
+`If-None-Match` answers `304`; an `If-Range` that differs from the current
+`ETag` answers the whole file. Bodies stream in 64 KiB chunks. Other paths get
+`404 not_found`, other methods `405` with `Allow`. Up to 64 connections are
+served with keep-alive; a connection that sends no request headers for 30
+seconds is closed.
 
 ## File loudness normalization (version 11)
 
@@ -401,7 +450,8 @@ all → video → radio in Library.
 
 ## Compatibility and storage
 
-All envelopes advertise protocol 13. Protocol 13 adds optional YouTube import
+All envelopes advertise protocol 14. Protocol 14 adds the HTTP API and
+`server_info.api_url`; the database version stays 9. Protocol 13 added optional YouTube import
 ranges and range-aware lookup. Database version 9 replaces the unique video ID
 constraint with a unique resource key (video ID plus normalized range), preserving
 track IDs, metadata, queue, and sessions in a transactional migration. Existing

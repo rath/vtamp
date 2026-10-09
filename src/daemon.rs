@@ -1,3 +1,4 @@
+mod api;
 mod archive;
 mod covers;
 mod imports;
@@ -105,6 +106,7 @@ pub async fn run(
     headless: bool,
     cast_enabled: bool,
     http: Option<std::net::SocketAddr>,
+    api: Option<std::net::SocketAddr>,
 ) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     let headless = {
@@ -143,13 +145,24 @@ pub async fn run(
         }
         None => None,
     };
+    let api = match api {
+        Some(address) => Some(api::Api::bind(address).await?),
+        None => None,
+    };
     let served = Arc::new(Served {
         cast: cast.clone(),
         url: http.as_ref().map(|http| http.url.clone()),
+        api_url: api.as_ref().map(|api| api.url.clone()),
         headless,
     });
     let http =
         http.map(|http| tokio::spawn(http.serve(cast.clone().expect("a cast exists with HTTP"))));
+    let api = api.map(|api| {
+        tokio::spawn(api.serve(Arc::new(api::Context {
+            sender: sender.clone(),
+            served: served.clone(),
+        })))
+    });
     let shutdown = Arc::new(Notify::new());
     let thread = {
         let events = events.clone();
@@ -218,6 +231,7 @@ pub async fn run(
         headless,
         cast = cast.is_some(),
         url = served.url.as_deref(),
+        api = served.api_url.as_deref(),
         "vtamp server ready"
     );
     loop {
@@ -239,6 +253,9 @@ pub async fn run(
     }
     if let Some(http) = http {
         http.abort();
+    }
+    if let Some(api) = api {
+        api.abort();
     }
     // Give the shutdown acknowledgement and final event time to reach clients.
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -270,7 +287,26 @@ async fn dispatch(sender: &mpsc::SyncSender<Work>, command: Command) -> Reply {
 struct Served {
     cast: Option<Arc<Hub>>,
     url: Option<String>,
+    api_url: Option<String>,
     headless: bool,
+}
+
+impl Served {
+    fn server_info(&self) -> ServerInfo {
+        ServerInfo {
+            mode: if self.headless {
+                ServerMode::Headless
+            } else {
+                ServerMode::Device
+            },
+            remote: None,
+            api_url: self.api_url.clone(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        }
+    }
+    fn cast_info(&self) -> CastInfo {
+        cast_info(self.cast.as_deref(), self.url.clone())
+    }
 }
 
 async fn connection(
@@ -310,20 +346,12 @@ async fn connection(
         return spectrum_connection(stream, spectrum).await;
     }
     if matches!(request.request, Command::ServerInfo) {
-        let reply = Reply::success(ServerInfo {
-            mode: if served.headless {
-                ServerMode::Headless
-            } else {
-                ServerMode::Device
-            },
-            remote: None,
-            version: env!("CARGO_PKG_VERSION").into(),
-        });
+        let reply = Reply::success(served.server_info());
         tokio::time::timeout(Duration::from_secs(5), wire::write(&mut stream, &reply)).await??;
         return Ok(());
     }
     if matches!(request.request, Command::CastInfo) {
-        let reply = Reply::success(cast_info(served.cast.as_deref(), served.url.clone()));
+        let reply = Reply::success(served.cast_info());
         tokio::time::timeout(Duration::from_secs(5), wire::write(&mut stream, &reply)).await??;
         return Ok(());
     }

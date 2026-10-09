@@ -270,6 +270,17 @@ mpv http://127.0.0.1:8000/cast/<token>
 
 The token is created once and kept in `cast.json` in the data directory; delete the file to issue a new one. Requests for any other path get `404`. The server speaks HTTP only on the address you give it, so keep it on loopback or a private network and put a reverse proxy such as Caddy in front for TLS and additional authentication; vtamp does not terminate TLS. Each track start, seek, and resume begins a new logical Ogg stream, which mpv, VLC, ffmpeg, and Firefox follow; Chrome and Safari handle chained Ogg Opus poorly or not at all, so browser support is limited to what you test.
 
+### Serve the Library to apps
+
+`--api ADDR` serves a JSON API and the Library's audio and cover files over plain HTTP, for apps that browse the Library, read the Queue, start YouTube imports, and play files themselves:
+
+```sh
+vtamp server start --api 100.64.0.1:8700      # this machine's Tailscale address
+vtamp server start --headless --api 100.64.0.1:8700
+```
+
+`server start --json` and `doctor --json` print `api_url`. The API has no TLS and no authentication: bind it to an address that only your own devices reach, such as a Tailscale address, never to a public interface. Binding `0.0.0.0` works, but the reported URL then shows `0.0.0.0`. Requests carry the same JSON as the local socket; commands that name paths on the server, `shutdown`, and subscriptions stay local. Audio and covers are chosen by Library track ID and support HTTP range requests. See [docs/protocol.md](docs/protocol.md#http-api-version-14).
+
 ### Linux builds are headless servers
 
 On Linux the binary builds without an audio device backend, so every server it starts is headless and `server start` behaves like `server start --headless`. Device playback, the relay described below, and live radio are macOS features. AAC decodes in software there (macOS keeps AudioToolbox). Building needs a C compiler and cmake for the bundled libopus; nothing else, in particular no ALSA, is required. The build is tested on Ubuntu 24.04 (aarch64) and in CI, and each release attaches a prebuilt aarch64 build (see [Install](#linux-headless-server)); a typical setup is a headless server on a Linux machine with the music files and relays or `vtamp cast listen` on the Macs that play it.
@@ -685,7 +696,7 @@ Run `vtamp --help` or `vtamp COMMAND --help` for argument details. All non-TUI c
 | `now` | Current track, remaining time, and settings without the full queue |
 | `tmux status [--max-width N] [--show-artist]` | One tmux-safe now-playing line; empty when stopped or unavailable |
 | `watch` | Initial state, state changes, progress heartbeats, and library events |
-| `server start [--headless\|--cast\|--cast-http ADDR\|--remote SOCKET]\|status\|stop` | Explicit server lifecycle; `--headless` casts Ogg Opus instead of using an audio device, `--cast` casts what the device plays, `--cast-http` also serves the cast over HTTP, `--remote` relays another server and plays its cast here |
+| `server start [--headless\|--cast\|--cast-http ADDR\|--api ADDR\|--remote SOCKET]\|status\|stop` | Explicit server lifecycle; `--headless` casts Ogg Opus instead of using an audio device, `--cast` casts what the device plays, `--cast-http` also serves the cast over HTTP, `--api` serves a JSON API and track files for apps over HTTP, `--remote` relays another server and plays its cast here |
 | `cast listen`, `cast status` | Write a headless server's Ogg Opus stream to standard output, or describe it |
 | `doctor` | Paths, connectivity, terminal environment, and default output device |
 | `theme list\|current\|set NAME` | List built-in/custom themes, read the saved default, or save it for future attachments |
@@ -945,7 +956,7 @@ and `queue_item_id`, or `kind: "deadline"` and `deadline_ms` (Unix milliseconds)
 
 ### Updating from older protocol versions
 
-This build uses **protocol 13** and migrates the library to **database version 9**
+This build uses **protocol 14** and migrates the library to **database version 9**
 when the new server starts. Stop an older running server using its matching old
 binary before starting the new binary, then reattach TUIs. Restart restores the
 selected track paused and clears stop reservations. Track IDs, queue entries,

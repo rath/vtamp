@@ -21,9 +21,12 @@ pub enum Launch {
         cast: bool,
         /// Serve the cast over HTTP at this address.
         http: Option<std::net::SocketAddr>,
+        /// Serve the JSON API and track files over HTTP at this address.
+        api: Option<std::net::SocketAddr>,
     },
     Headless {
         http: Option<std::net::SocketAddr>,
+        api: Option<std::net::SocketAddr>,
     },
     /// Relay the server reachable at this socket path.
     Relay(std::path::PathBuf),
@@ -150,6 +153,7 @@ impl Client {
         self.ensure_with(&Launch::Device {
             cast: false,
             http: None,
+            api: None,
         })
         .await
     }
@@ -186,18 +190,24 @@ impl Client {
         let mut command = Process::new(std::env::current_exe()?);
         command.arg("server").arg("run");
         match launch {
-            Launch::Device { cast, http } => {
+            Launch::Device { cast, http, api } => {
                 if *cast {
                     command.arg("--cast");
                 }
                 if let Some(http) = http {
                     command.arg("--cast-http").arg(http.to_string());
                 }
+                if let Some(api) = api {
+                    command.arg("--api").arg(api.to_string());
+                }
             }
-            Launch::Headless { http } => {
+            Launch::Headless { http, api } => {
                 command.arg("--headless");
                 if let Some(http) = http {
                     command.arg("--cast-http").arg(http.to_string());
+                }
+                if let Some(api) = api {
+                    command.arg("--api").arg(api.to_string());
                 }
             }
             Launch::Relay(remote) => {

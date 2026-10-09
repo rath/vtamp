@@ -525,6 +525,9 @@ pub enum Server {
         /// Serve the cast over plain HTTP at this address for players and browsers; implies --cast.
         #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
         cast_http: Option<std::net::SocketAddr>,
+        /// Serve the JSON API and track files for apps over plain HTTP at this address.
+        #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
+        api: Option<std::net::SocketAddr>,
     },
     Status,
     Stop,
@@ -538,6 +541,8 @@ pub enum Server {
         cast: bool,
         #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
         cast_http: Option<std::net::SocketAddr>,
+        #[arg(long, value_name = "ADDR", conflicts_with = "remote")]
+        api: Option<std::net::SocketAddr>,
     },
 }
 
@@ -827,6 +832,7 @@ pub async fn run(args: Args) -> Result<()> {
                     remote,
                     cast,
                     cast_http,
+                    api,
                 },
         } => {
             tracing_subscriber::fmt()
@@ -841,7 +847,7 @@ pub async fn run(args: Args) -> Result<()> {
                 Some(remote) => crate::relay::run(paths, remote).await,
                 #[cfg(not(target_os = "macos"))]
                 Some(_) => bail!(RELAY_UNAVAILABLE),
-                None => crate::daemon::run(paths, headless, cast, cast_http).await,
+                None => crate::daemon::run(paths, headless, cast, cast_http, api).await,
             };
         }
         Action::Server {
@@ -851,6 +857,7 @@ pub async fn run(args: Args) -> Result<()> {
                     remote,
                     cast,
                     cast_http,
+                    api,
                 },
         } => {
             if remote.is_some() && !cfg!(target_os = "macos") {
@@ -858,10 +865,14 @@ pub async fn run(args: Args) -> Result<()> {
             }
             let launch = match remote {
                 Some(remote) => Launch::Relay(std::path::absolute(remote)?),
-                None if headless => Launch::Headless { http: cast_http },
+                None if headless => Launch::Headless {
+                    http: cast_http,
+                    api,
+                },
                 None => Launch::Device {
                     cast: cast || cast_http.is_some(),
                     http: cast_http,
+                    api,
                 },
             };
             client.ensure_with(&launch).await?;
@@ -881,10 +892,14 @@ pub async fn run(args: Args) -> Result<()> {
                     "A server is already running without --cast-http; run vtamp server stop first"
                 );
             }
+            if api.is_some() && info.api_url.is_none() {
+                bail!("A server is already running without --api; run vtamp server stop first");
+            }
             let explicit = launch
                 != Launch::Device {
                     cast: false,
                     http: None,
+                    api: None,
                 };
             let matches = info.mode == launch.mode()
                 && match &launch {
@@ -907,7 +922,7 @@ pub async fn run(args: Args) -> Result<()> {
                 Reply::success(json!({
                     "running": true, "socket": paths.socket(), "mode": info.mode,
                     "remote": info.remote, "headless": info.mode == ServerMode::Headless,
-                    "cast": cast_available, "cast_url": cast_url,
+                    "cast": cast_available, "cast_url": cast_url, "api_url": info.api_url,
                 })),
                 args.json,
             );

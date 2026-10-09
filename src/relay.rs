@@ -451,6 +451,7 @@ async fn connection(mut stream: UnixStream, relay: Arc<Relay>) -> Result<()> {
                 Reply::success(ServerInfo {
                     mode: ServerMode::Relay,
                     remote: Some(relay.remote.clone()),
+                    api_url: None,
                     version: env!("CARGO_PKG_VERSION").into(),
                 }),
             )

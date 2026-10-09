@@ -5,8 +5,8 @@ terminal clients (virtual terminal + Winamp). Music must keep playing when a TUI
 exits or a tmux client detaches.
 
 - Single Rust crate, edition 2024, Rust 1.90 or newer; use `Cargo.lock`. TUI:
-  ratatui + crossterm; audio: rodio; transport: Unix sockets; persistence: bundled
-  SQLite. The website in `site/` is static HTML/CSS/JS without a build step.
+  ratatui + crossterm; audio: rodio; transport: Unix sockets, plus opt-in plain
+  HTTP listeners for the cast and the app API; persistence: bundled SQLite. The website in `site/` is static HTML/CSS/JS without a build step.
 - macOS is the supported platform for playback. Linux builds are headless servers
   only: no device playback, relay, media keys, or radio; AAC decodes in software
   there. CI covers both, and the Linux build is tested on Ubuntu 24.04 (aarch64).
@@ -36,7 +36,7 @@ Put new feature details in those documents, not here.
 | --- | --- |
 | Shared model, protocol version | `src/model.rs` |
 | Playback state machine, batch queue edits | `src/engine.rs`, `src/queue_edit.rs` |
-| Server, transport | `src/daemon.rs`, `src/daemon/`, `src/client.rs`, `src/wire.rs` |
+| Server, transport, HTTP API for apps | `src/daemon.rs`, `src/daemon/`, `src/daemon/api.rs`, `src/client.rs`, `src/wire.rs` |
 | Decoding, output, radio | `src/audio.rs`, `src/audio/` |
 | Ogg Opus cast for headless servers and remote listeners | `src/cast.rs`, `src/cast/` |
 | Relay mode: forward commands to a remote server, play its cast locally | `src/relay.rs` |
@@ -129,7 +129,7 @@ The documents above hold the full contracts; these are the most common regressio
 - Queue entry IDs are not library track IDs, and direct `--no-queue` IDs are
   neither. Never silently deduplicate a queue. Shuffle changes playback order, not
   visible order. Repeat-one applies only to natural endings.
-- The protocol version is 13 and the database version is 9. A schema change needs
+- The protocol version is 14 and the database version is 9. A schema change needs
   a transactional, ID-preserving migration, a version bump, and a `docs/protocol.md`
   update.
 - Casts (headless servers, and device servers started with `--cast`) carry
@@ -161,6 +161,9 @@ The documents above hold the full contracts; these are the most common regressio
   variable name, never plaintext config; connection tests send only a generic
   request, never library data.
 - Radio persists registered URLs only, never resolved or tokenized endpoints.
+- The HTTP API exists only with `--api`. It serves catalog files by track ID
+  only, refuses commands that name server paths, and never terminates TLS or
+  authenticates; the private network in front of it does.
 - Terminal input, server events, and artwork completions stay immediately
   actionable: no polling gate, and artwork decodes off the input loop. Text fields
   show the real terminal cursor at the caret so IME composition (for example CJK
