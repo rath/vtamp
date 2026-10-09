@@ -73,9 +73,11 @@ struct LibraryView: View {
         @Bindable var model = model
         NavigationStack {
             List {
-                ForEach(Array(model.tracks.enumerated()), id: \.element.id) { offset, track in
+                ForEach(model.tracks) { track in
+                    // One track at a time: it plays now and the queue stays.
+                    // The server's Queue is what loads a whole list.
                     Button {
-                        player.play(model.tracks, startingAt: offset)
+                        player.playNow(track)
                     } label: {
                         TrackRow(track: track, isCurrent: player.current?.id == track.id)
                     }

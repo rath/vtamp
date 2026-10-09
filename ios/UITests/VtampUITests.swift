@@ -21,7 +21,7 @@ final class VtampUITests: XCTestCase {
         app.launchEnvironment["VTAMP_MUTED"] = "1"
         app.launch()
 
-        // Library: a tap plays the list from that track and opens the player.
+        // Library: a tap plays that track now and opens the player.
         // The tap lands in the blank space between the title and the duration,
         // which must count as much as the text.
         let tone = row(app, "Tone")

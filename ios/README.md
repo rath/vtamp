@@ -28,7 +28,7 @@ such as `music-box.tailnet.ts.net:8700` work too.
 
 | Tab | Contents |
 | --- | --- |
-| Library | Search by title, artist, or album and filter by kind, 200 tracks per page. Tapping a track plays the loaded list from it and opens the player; swipe or long-press for **Play Next** and **Add to Queue**. |
+| Library | Search by title, artist, or album and filter by kind, 200 tracks per page. Tapping a track plays it now, after the current track, keeping the rest of the queue, and opens the player; swipe or long-press for **Play Next** and **Add to Queue**. |
 | Queue | **This iPhone**: the phone's queue, with reordering, deletion, and Clear. **Server**: the server's Queue and what it is playing, read-only; tapping an entry plays the server's Queue from there on the phone. |
 | Import | A YouTube URL, an optional Start and End (seconds, `M:SS`, or `H:MM:SS`), and the whole playlist when the URL names one. The server runs yt-dlp; progress, Cancel, Retry, and Play for finished jobs follow. Shown only when the server has yt-dlp. |
 | Settings | The server address and what the server reports about itself. The address is the only thing the app saves. |
