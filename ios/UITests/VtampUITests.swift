@@ -76,6 +76,52 @@ final class VtampUITests: XCTestCase {
         XCTAssertTrue(row(app, "어떻게 사랑이 그래요").waitForExistence(timeout: 15), "The Library reloads after the import")
     }
 
+    /// A track with a saved video shows the picture in the player and
+    /// switches back to the cover. Skipped when the server has no `Clip`.
+    @MainActor
+    func testSavedVideoFollowsPlayback() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["VTAMP_SERVER"] = server
+        app.launchEnvironment["VTAMP_MUTED"] = "1"
+        app.launch()
+
+        let title = ProcessInfo.processInfo.environment["VTAMP_UITEST_VIDEO_TRACK"] ?? "Clip"
+        let clip = row(app, title)
+        guard clip.waitForExistence(timeout: 15) else {
+            throw XCTSkip("The server has no track named \(title) with a saved video")
+        }
+        // A tap on the row button alone is sometimes dropped by the simulator;
+        // the title text and a short press reach the same action.
+        clip.tap()
+        let pause = app.buttons["Pause"].firstMatch
+        if !pause.waitForExistence(timeout: 4) {
+            app.staticTexts[title].firstMatch.tap()
+        }
+        if !pause.waitForExistence(timeout: 4) {
+            clip.press(forDuration: 0.1)
+        }
+        XCTAssertTrue(pause.waitForExistence(timeout: 15), "Playback starts")
+        app.buttons["Now Playing: \(title)"].firstMatch.tap()
+        let video = app.descendants(matching: .any)["video"].firstMatch
+        XCTAssertTrue(video.waitForExistence(timeout: 20), "The saved video shows in the player")
+        let framed = expectation(for: NSPredicate { element, _ in
+            guard let value = (element as? XCUIElement)?.value as? String,
+                  let frames = Int(value.split(separator: " ").first ?? "") else { return false }
+            return frames > 0
+        }, evaluatedWith: video)
+        wait(for: [framed], timeout: 20)
+        snapshot(app, "video")
+
+        let toggle = app.buttons["videoSwitch"]
+        XCTAssertEqual(toggle.label, "Cover")
+        toggle.tap()
+        XCTAssertTrue(video.waitForNonExistence(timeout: 5), "The cover replaces the video")
+        XCTAssertEqual(toggle.label, "Video")
+        toggle.tap()
+        XCTAssertTrue(video.waitForExistence(timeout: 20), "The video comes back")
+        app.buttons["Done"].tap()
+    }
+
     /// The slider's `m:ss` value in seconds.
     private func seconds(_ slider: XCUIElement) throws -> Int {
         let text = try XCTUnwrap(slider.value as? String)

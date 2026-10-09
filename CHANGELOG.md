@@ -34,6 +34,11 @@
   and plays Library files on the phone with its own queue, background audio,
   and lock-screen controls. Built with Xcode and XcodeGen; installed with your
   own Apple ID.
+- The iPhone app shows a track's saved video in the player, in step with the
+  audio: it demuxes the server's Matroska sidecar itself and hands the stored
+  AV1, H.264, or HEVC samples to the phone's decoder, so nothing is re-encoded.
+  A Cover / Video button keeps the choice. VP9 sidecars decode in software with
+  libvpx when the app is built with it.
 
 ### Changed
 

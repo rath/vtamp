@@ -7,6 +7,7 @@ struct RootView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(ImportsModel.self) private var imports
+    @Environment(VideoRenderer.self) private var video
     @Environment(\.scenePhase) private var scenePhase
     @State private var section: Section = .library
 
@@ -35,8 +36,14 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, app.isConfigured {
-                Task { await app.refresh() }
+            if phase == .active {
+                video.resume()
+                if app.isConfigured {
+                    Task { await app.refresh() }
+                }
+            } else {
+                // Decoding stops out of sight; the audio keeps playing.
+                video.suspend()
             }
         }
         // Import progress drives Library refreshes from any tab.

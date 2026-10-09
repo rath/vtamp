@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 
 /// What the audio engine reports back to `Player`, always on the main actor.
@@ -16,6 +17,8 @@ enum PlaybackEvent: Equatable, Sendable {
 protocol PlaybackEngine: AnyObject {
     var onEvent: ((PlaybackEvent) -> Void)? { get set }
     var isMuted: Bool { get set }
+    /// The current item's clock, for a picture that follows the audio.
+    var timebase: CMTimebase? { get }
     func load(_ url: URL, mimeType: String?)
     /// Start fetching the next file so the switch is quick.
     func prefetch(_ url: URL, mimeType: String?)

@@ -9,7 +9,9 @@ exits or a tmux client detaches.
   HTTP listeners for the cast and the app API; persistence: bundled SQLite. The
   website in `site/` is static HTML/CSS/JS without a build step. `ios/` is a
   SwiftUI iPhone client of the HTTP API (iOS 18, Swift 6, XcodeGen); its Xcode
-  project is generated, never committed.
+  project is generated, never committed. It plays saved video from the
+  server's Matroska sidecar with its own demuxer and the phone's hardware
+  decoders; nothing is transcoded on either side.
 - macOS is the supported platform for playback. Linux builds are headless servers
   only: no device playback, relay, media keys, or radio; AAC decodes in software
   there. CI covers both, and the Linux build is tested on Ubuntu 24.04 (aarch64).

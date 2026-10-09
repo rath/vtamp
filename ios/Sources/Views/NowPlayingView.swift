@@ -83,13 +83,14 @@ private struct ErrorStrip: View {
 
 struct NowPlayingView: View {
     @Environment(Player.self) private var player
+    @Environment(VideoRenderer.self) private var video
     @Environment(\.dismiss) private var dismiss
     @State private var scrub: TimeInterval?
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                CoverImage(track: player.current, size: nil, cornerRadius: 12)
+                artwork
                     .frame(maxWidth: 360)
                     .shadow(radius: 12, y: 6)
                     .padding(.top)
@@ -113,6 +114,40 @@ struct NowPlayingView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .onAppear { video.wanted = true }
+            .onDisappear { video.wanted = false }
+        }
+    }
+
+    /// The saved video while it shows, else the cover; a switch between the
+    /// two for tracks that have a video.
+    private var artwork: some View {
+        VStack(spacing: 12) {
+            if case let .showing(width, height) = video.state {
+                VideoSurface(layer: video.layer)
+                    .aspectRatio(CGFloat(max(width, 1)) / CGFloat(max(height, 1)), contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement()
+                    .accessibilityIdentifier("video")
+                    .accessibilityLabel("Video")
+                    .accessibilityValue("\(video.framesEnqueued) frames")
+            } else {
+                CoverImage(track: player.current, size: nil, cornerRadius: 12)
+            }
+            if player.current?.video == true {
+                Button(video.preferred ? "Cover" : "Video") {
+                    video.preferred.toggle()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("videoSwitch")
+                if video.preferred, case let .unavailable(reason) = video.state {
+                    Text(reason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
             }
         }

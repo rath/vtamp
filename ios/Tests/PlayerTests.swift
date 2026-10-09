@@ -1,3 +1,4 @@
+import CoreMedia
 import Foundation
 import Testing
 @testable import Vtamp
@@ -6,6 +7,7 @@ import Testing
 final class FakeEngine: PlaybackEngine {
     var onEvent: ((PlaybackEvent) -> Void)?
     var isMuted = false
+    var timebase: CMTimebase?
     private(set) var loaded: [URL] = []
     private(set) var prefetched: [URL] = []
     private(set) var seeks: [TimeInterval] = []
@@ -22,6 +24,16 @@ final class FakeEngine: PlaybackEngine {
     func emit(_ event: PlaybackEvent) { onEvent?(event) }
 
     var lastLoadedID: String? { loaded.last?.deletingLastPathComponent().lastPathComponent }
+}
+
+@MainActor
+final class FakeVideoSink: VideoSink {
+    private(set) var events: [String] = []
+
+    func trackChanged(_ track: Track?) { events.append("changed:\(track?.id ?? "-")") }
+    func ready(track: Track, timebase: CMTimebase?) { events.append("ready:\(track.id)") }
+    func seek(to seconds: TimeInterval) { events.append("seek:\(Int(seconds))") }
+    func stopped() { events.append("stopped") }
 }
 
 @MainActor
@@ -168,5 +180,30 @@ struct PlayerTests {
         #expect(player.duration == 1)
         engine.emit(.ready(duration: 1.25))
         #expect(player.duration == 1.25)
+    }
+}
+
+@MainActor
+struct PlayerVideoTests {
+    @Test func tellsTheVideoSinkAboutTracksReadinessSeeksAndStops() {
+        let engine = FakeEngine()
+        let player = Player(engine: engine) { track in
+            URL(string: "http://server/api/library/\(track.id)/audio")
+        }
+        let sink = FakeVideoSink()
+        player.video = sink
+        let tracks = ["a", "b"].map { Track(id: $0, path: "/music/\($0).m4a", title: $0, video: true) }
+        player.play(tracks, startingAt: 0)
+        #expect(sink.events == ["changed:a"])
+        engine.emit(.ready(duration: 10))
+        #expect(sink.events.last == "ready:a")
+        player.seek(to: 5)
+        #expect(sink.events.last == "seek:5")
+        player.next()
+        #expect(sink.events.last == "changed:b")
+        engine.emit(.ended)
+        #expect(sink.events.last == "seek:0", "the end of the queue rewinds the picture too")
+        player.clear()
+        #expect(sink.events.last == "stopped")
     }
 }

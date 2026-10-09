@@ -38,6 +38,13 @@ targets:
     platform: iOS
     sources:
       - path: Tests
+      # The synthetic Matroska clips shared with the Rust HTTP API test.
+      - path: ../tests/fixtures/video-h264.mkv
+        buildPhase: resources
+      - path: ../tests/fixtures/video-av1.mkv
+        buildPhase: resources
+      - path: ../tests/fixtures/video-vp9.mkv
+        buildPhase: resources
     dependencies:
       - target: Vtamp
     settings:

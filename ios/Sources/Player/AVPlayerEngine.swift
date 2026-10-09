@@ -10,6 +10,7 @@ final class AVPlayerEngine: PlaybackEngine {
         get { player.isMuted }
         set { player.isMuted = newValue }
     }
+    var timebase: CMTimebase? { player.currentItem?.timebase }
 
     private let player = AVPlayer()
     private var generation = 0

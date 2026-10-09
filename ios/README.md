@@ -38,9 +38,24 @@ controls, headphone buttons, and artwork. Unplugging headphones pauses, and a
 phone call pauses and resumes. Audio is fetched with HTTP range requests, so
 seeking does not download the whole file.
 
+### Saved video
+
+A track with a saved video (`· VIDEO` in the TUI) shows its picture in the Now
+Playing sheet in place of the cover, in step with the audio; the **Cover** /
+**Video** button under it switches, and the choice is kept like the TUI's `w`.
+The app reads the server's `video.mkv` sidecar as it is: a Matroska demuxer in
+the app feeds the stored AV1, H.264, or HEVC samples to the iPhone's hardware
+decoder, so nothing is re-encoded or remuxed. AV1 needs an iPhone 15 Pro or
+later; on other phones the cover stays with a notice. VP9 sidecars decode in
+software through libvpx when the app is built with it (see [VP9 with
+libvpx](#vp9-with-libvpx)); without that build they show the cover and a notice.
+Video decodes only while the sheet is on screen and the app is in the
+foreground; the audio is never affected by a video that cannot be shown. The
+app stays in portrait.
+
 Not on the iPhone: radio channels and Ogg Vorbis files (they appear greyed
-out), the server's loudness normalization, shuffle and repeat, video, and
-controlling the server's own playback. Nothing is downloaded for offline use.
+out), the server's loudness normalization, shuffle and repeat, and controlling
+the server's own playback. Nothing is downloaded for offline use.
 
 ## Build
 
@@ -89,6 +104,11 @@ does) rather than real network downloads.
 vtamp_test_home=$(mktemp -d /tmp/vtamp-agent.XXXXXX)
 VTAMP_HOME="$vtamp_test_home" target/release/vtamp server start --headless --api 127.0.0.1:8711
 # Add a few tracks named Tone and Song, a radio channel named Test FM, and queue Song.
+# For the video step, add a managed import directory with a sidecar: a folder
+# named after an eleven-character video ID holding audio.m4a, video.mkv (for
+# example tests/fixtures/video-h264.mkv), and a source.json manifest whose
+# metadata title is Clip; the scan registers it with video: true. The step is
+# skipped when no Clip exists.
 TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
   -project ios/Vtamp.xcodeproj -scheme Vtamp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
@@ -110,7 +130,8 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/API` | HTTP client, protocol commands, address parsing |
 | `Sources/Model` | Library, Queue, and import types; time parsing |
 | `Sources/Player` | Queue and transport, AVPlayer engine, audio session, lock-screen controls, artwork cache |
-| `Sources/Views` | Library, Queue, Now Playing, Import, Settings |
+| `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the renderer that follows the audio clock |
+| `Sources/Views` | Library, Queue, Now Playing (with the video surface), Import, Settings |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 
 The app icon is generated from `assets/icon.png` by `scripts/build-icons.py`.

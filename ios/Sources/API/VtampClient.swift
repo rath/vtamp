@@ -63,6 +63,11 @@ final class VtampClient: Sendable {
         track.hasCover ? baseURL.appending(components: "library", track.id, "cover") : nil
     }
 
+    /// The saved silent video sidecar; a server without one answers 404.
+    func videoURL(for track: Track) -> URL {
+        baseURL.appending(components: "library", track.id, "video")
+    }
+
     func server() async throws(VtampError) -> ServerDescriptor {
         let (data, response) = try await load(URLRequest(url: baseURL.appending(component: "server")))
         let descriptor: ServerDescriptor = try unwrap(data, response)

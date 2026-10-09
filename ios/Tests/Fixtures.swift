@@ -4,9 +4,9 @@ import Foundation
 enum Fixture {
     private final class Anchor {}
 
-    static func data(_ name: String) throws -> Data {
+    static func data(_ name: String, extension: String = "json") throws -> Data {
         let bundle = Bundle(for: Anchor.self)
-        guard let url = bundle.url(forResource: name, withExtension: "json") else {
+        guard let url = bundle.url(forResource: name, withExtension: `extension`) else {
             throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: name])
         }
         return try Data(contentsOf: url)

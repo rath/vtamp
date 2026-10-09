@@ -18,6 +18,8 @@ final class Player {
 
     @ObservationIgnored var onTrackChange: (() -> Void)?
     @ObservationIgnored var onStateChange: (() -> Void)?
+    /// Follows the audio with the track's saved video, when there is one.
+    @ObservationIgnored var video: (any VideoSink)?
 
     @ObservationIgnored private let engine: any PlaybackEngine
     @ObservationIgnored private let resolve: (Track) -> URL?
@@ -133,6 +135,7 @@ final class Player {
 
     func clear() {
         engine.stop()
+        video?.stopped()
         queue = []
         index = nil
         loadedID = nil
@@ -192,6 +195,7 @@ final class Player {
     func seek(to seconds: TimeInterval) {
         position = seconds
         engine.seek(to: seconds)
+        video?.seek(to: seconds)
         onStateChange?()
     }
 
@@ -213,6 +217,7 @@ final class Player {
         position = 0
         duration = track.duration
         isBuffering = autoplay
+        video?.trackChanged(track)
         engine.load(url, mimeType: track.mimeType)
         if autoplay {
             engine.play()
@@ -233,6 +238,7 @@ final class Player {
     private func finish() {
         engine.pause()
         engine.seek(to: 0)
+        video?.seek(to: 0)
         position = 0
         onStateChange?()
     }
@@ -242,6 +248,9 @@ final class Player {
         case let .ready(duration):
             failures = 0
             if let duration, duration > 0 { self.duration = duration }
+            if let track = current {
+                video?.ready(track: track, timebase: engine.timebase)
+            }
             onStateChange?()
         case let .time(seconds):
             position = seconds
