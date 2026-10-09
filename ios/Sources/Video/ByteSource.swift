@@ -64,7 +64,7 @@ struct DataByteSource: ByteSource {
 /// `If-Range` with the file's `ETag` turns a rewritten file into an error
 /// instead of a mix of two versions.
 actor HTTPByteSource: ByteSource {
-    static let chunkSize: Int64 = 512 * 1024
+    static let chunkSize: Int64 = 256 * 1024
     static let cachedChunks = 24
 
     nonisolated let length: Int64
