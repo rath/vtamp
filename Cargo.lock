@@ -1743,6 +1743,7 @@ dependencies = [
  "objc2",
  "objc2-core-media",
  "objc2-foundation",
+ "objc2-media-toolbox",
 ]
 
 [[package]]
@@ -1874,6 +1875,18 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-media-toolbox"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd9fdde720df3da7046bb9097811000c1e7ab5cd579fa89d96b27d56781fb30"
+dependencies = [
+ "objc2",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-core-media",
 ]
 
 [[package]]
@@ -3602,6 +3615,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation",
  "objc2-media-player",
+ "objc2-media-toolbox",
  "ogg_pager",
  "opus",
  "rand 0.10.3",

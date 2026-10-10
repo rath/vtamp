@@ -216,7 +216,8 @@ connection does not advance the queue. Next/previous remain manual navigation an
 cancel a pending connection, so they switch channels immediately while a station
 is still connecting.
 
-Live radio has no seekable timeline, natural ending, or spectrum in this release.
+Live radio has no seekable timeline or natural ending. Its spectrum needs a server
+running macOS 27 or newer; see [See the music](#see-the-music).
 Use `vtamp sleep set 30m` to stop on a timer; `stop --after-current` rejects live
 channels. Native playback supports HLS and HTTP(S) MP3/AAC; login/DRM services,
 YouTube live, recording, and timeshift are outside this feature. Availability
@@ -434,6 +435,10 @@ with green, yellow, and red height zones and falling peak markers. Colors follow
 your theme. This is a visualization, not an equalizer; it never changes the sound.
 Analysis uses the decoded signal before app volume, so the bars also move when muted.
 Mono and stereo are supported; multichannel files visualize the front stereo pair.
+Live radio is analyzed the same way from the audio the system player decodes,
+when the server runs macOS 27 or newer. Older systems cannot tap HTTP Live
+Streaming audio, so the panel says that the server needs macOS 27. A relay shows
+no radio spectrum because radio is not cast.
 
 In short panes, the spectrum replaces the Library/Queue area. **`Tab`** returns to
 the previous list; **`/`** returns to the focused list and opens a blank search

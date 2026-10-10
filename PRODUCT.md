@@ -84,5 +84,5 @@ Local m4a files outside the repository are available for development verificatio
 
 Live radio shares Library and Queue navigation. Pause disconnects and resume tunes
 to the current broadcast; transient disconnects retry the same channel. Radio has
-no timeline or spectrum in this release. Registration requires no installed import
+no timeline in this release; its spectrum needs macOS 27 or newer on the server. Registration requires no installed import
 tools, and folder scans do not remove stations.

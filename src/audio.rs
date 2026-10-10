@@ -276,6 +276,7 @@ impl RodioBackend {
         self.report_output(true);
         if let Some(spectrum) = &self.spectrum {
             spectrum.reset();
+            spectrum.unavailable(None);
         }
         if let Some(player) = self.player.take() {
             player.cancelled.store(true, Ordering::Release);
@@ -352,7 +353,12 @@ impl PlaybackBackend for RodioBackend {
                 self.stop();
                 #[cfg(target_os = "macos")]
                 {
-                    self.radio = Some(radio::Player::new(url.clone(), volume, paused)?);
+                    self.radio = Some(radio::Player::new(
+                        url.clone(),
+                        volume,
+                        paused,
+                        self.spectrum.clone(),
+                    )?);
                     self.volume = volume;
                     self.paused = paused;
                     Ok(())
@@ -368,7 +374,18 @@ impl PlaybackBackend for RodioBackend {
     fn stream_update(&mut self) -> Option<StreamUpdate> {
         #[cfg(target_os = "macos")]
         if let Some(radio) = &self.radio {
-            return Some(radio.poll());
+            let update = radio.poll();
+            if let Some(spectrum) = &self.spectrum {
+                // Analysis follows the station: only while it plays and its decoded
+                // audio actually reaches the tap. This thread owns the flag.
+                spectrum.unavailable(radio.spectrum_unavailable());
+                spectrum.playing(
+                    !self.paused
+                        && radio.spectrum_tapped()
+                        && update.status == crate::model::StreamStatus::Live,
+                );
+            }
+            return Some(update);
         }
         None
     }
@@ -409,6 +426,10 @@ impl PlaybackBackend for RodioBackend {
         #[cfg(target_os = "macos")]
         if let Some(radio) = &mut self.radio {
             radio.pause();
+            // A new generation: resume tunes a new item with a new tap.
+            if let Some(spectrum) = &self.spectrum {
+                spectrum.reset();
+            }
             self.paused = true;
             return;
         }

@@ -1,7 +1,9 @@
 //! AVPlayer owns network buffering and decoding. Only control runs on the main
 //! run loop; the serialized playback owner never waits for a network operation.
+mod tap;
+
 use super::StreamUpdate;
-use crate::model::StreamStatus;
+use crate::{model::StreamStatus, spectrum::Spectrum};
 use anyhow::{Context, Result, ensure};
 use dispatch2::DispatchQueue;
 use objc2::{
@@ -83,6 +85,9 @@ struct Configuration {
 struct Shared {
     id: u64,
     url: String,
+    /// Analysis of what the native player decodes, when the system can tap it.
+    spectrum: Option<Arc<Spectrum>>,
+    tap: Arc<tap::Report>,
     configuration: Mutex<Configuration>,
     scheduled: AtomicBool,
     closed: AtomicBool,
@@ -91,7 +96,12 @@ pub(super) struct Player {
     shared: Arc<Shared>,
 }
 impl Player {
-    pub(super) fn new(url: String, volume: u8, paused: bool) -> Result<Self> {
+    pub(super) fn new(
+        url: String,
+        volume: u8,
+        paused: bool,
+        spectrum: Option<Arc<Spectrum>>,
+    ) -> Result<Self> {
         ensure!(
             RUNNING.load(Ordering::Acquire),
             "Native stream run loop is unavailable"
@@ -100,6 +110,8 @@ impl Player {
             shared: Arc::new(Shared {
                 id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
                 url,
+                spectrum: spectrum.filter(|_| tap::supported()),
+                tap: Arc::default(),
                 configuration: Mutex::new(Configuration {
                     generation: 0,
                     paused,
@@ -146,7 +158,7 @@ impl Player {
                     let native = players
                         .entry(shared.id)
                         .or_insert_with(|| Native::new(generation));
-                    let update = native.poll(&shared.url, volume);
+                    let update = native.poll(&shared, volume);
                     let mut config = shared.configuration.lock().unwrap();
                     if config.generation == generation && !shared.closed.load(Ordering::Acquire) {
                         config.update = update;
@@ -187,6 +199,20 @@ impl Player {
         self.shared.configuration.lock().unwrap().volume = volume;
         self.schedule();
     }
+    /// Whether decoded audio of this station currently reaches the analysis.
+    pub(super) fn spectrum_tapped(&self) -> bool {
+        self.shared.tap.prepared()
+    }
+    /// Why this station cannot be analyzed, if it cannot.
+    pub(super) fn spectrum_unavailable(&self) -> Option<&'static str> {
+        if !tap::supported() {
+            Some(tap::NEEDS_MIX_TAP)
+        } else if self.shared.tap.failed() {
+            Some(tap::TAP_FAILED)
+        } else {
+            None
+        }
+    }
 }
 impl Drop for Player {
     fn drop(&mut self) {
@@ -205,6 +231,8 @@ struct Native {
     retry_at: Option<Instant>,
     attempts: u32,
     update: StreamUpdate,
+    /// The tap's format has been logged for this connection.
+    tap_logged: bool,
 }
 fn retry_delay(attempt: u32) -> Duration {
     Duration::from_secs((1u64 << attempt.min(5)).min(30))
@@ -225,6 +253,7 @@ impl Native {
                 error: None,
                 fatal: false,
             },
+            tap_logged: false,
         }
     }
     fn clear(&mut self) {
@@ -253,7 +282,7 @@ impl Native {
         self.retry_at = Some(now + retry_delay(self.attempts));
         self.attempts = self.attempts.saturating_add(1);
     }
-    fn poll(&mut self, address: &str, volume: u8) -> StreamUpdate {
+    fn poll(&mut self, shared: &Shared, volume: u8) -> StreamUpdate {
         let now = Instant::now();
         if self.update.fatal || self.retry_at.is_some_and(|at| at > now) {
             return self.update.clone();
@@ -263,13 +292,16 @@ impl Native {
         // or Objective-C objects cross the control channel.
         unsafe {
             if self.player.is_none() {
-                let Some(url) = NSURL::URLWithString(&NSString::from_str(address)) else {
+                let Some(url) = NSURL::URLWithString(&NSString::from_str(&shared.url)) else {
                     self.retry(now, Some(-1000));
                     return self.update.clone();
                 };
                 let mtm = MainThreadMarker::new().unwrap();
                 let item = AVPlayerItem::playerItemWithURL(&url, mtm);
                 item.setPreferredForwardBufferDuration(5.0);
+                if let Some(spectrum) = &shared.spectrum {
+                    tap::attach(&item, spectrum, &shared.tap);
+                }
                 let player = AVPlayer::playerWithPlayerItem(Some(&item), mtm);
                 player.setVolume(f32::from(volume) / 100.0);
                 player.play();
@@ -278,6 +310,21 @@ impl Native {
                 self.progressed_at = now;
                 self.progress = 0.0;
                 self.retry_at = None;
+            }
+            if !self.tap_logged && shared.tap.prepared() {
+                self.tap_logged = true;
+                match shared.tap.format() {
+                    Some(format) => tracing::info!(
+                        rate = format.rate,
+                        channels = format.channels,
+                        kind = ?format.kind,
+                        interleaved = format.interleaved,
+                        "Radio spectrum tap prepared"
+                    ),
+                    None => {
+                        tracing::info!("Radio spectrum tap prepared in a format it cannot analyze")
+                    }
+                }
             }
             let player = self.player.as_ref().unwrap();
             player.setVolume(f32::from(volume) / 100.0);

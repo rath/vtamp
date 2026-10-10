@@ -255,19 +255,15 @@ impl App {
     }
     pub(super) fn draw_spectrum(&mut self, frame: &mut Frame, area: Rect, bordered: bool) {
         let p = self.theme.palette();
-        if self
-            .state
-            .current()
-            .is_some_and(|item| item.track.is_live())
-        {
-            let mut paragraph =
-                Paragraph::new("Spectrum unavailable for live radio.\nv closes · Tab lists")
-                    .wrap(Wrap { trim: false })
-                    .style(Style::default().fg(p.muted));
+        if let Some(reason) = self.spectrum.unavailable() {
+            let mut paragraph = Paragraph::new(format!("{reason}.\nv closes · Tab lists"))
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(p.muted));
             if bordered {
                 paragraph = paragraph.block(block(p, " SPECTRUM ", false));
             }
             frame.render_widget(paragraph, area);
+            self.spectrum.notice_drawn();
         } else {
             let font = self.artwork.font_size();
             self.spectrum.draw(

@@ -69,12 +69,14 @@ security-framework = "3"
 objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = ["std", "ExtendedAudioFile", "objc2-core-audio-types", "objc2-core-foundation"] }
 objc2-core-audio-types = { version = "0.3.2", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFURL", "CFRunLoop"] }
-objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std", "AVPlayer", "AVPlayerItem", "objc2-core-media"] }
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std", "AVPlayer", "AVPlayerItem", "AVAudioMix", "objc2-core-media", "objc2-media-toolbox"] }
+# MTAudioProcessingTap for the radio spectrum; AVFoundation attaches it to the player item.
+objc2-media-toolbox = { version = "0.3.2", default-features = false, features = ["std", "MTAudioProcessingTap", "objc2", "objc2-core-audio-types", "objc2-core-media"] }
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSRunningApplication", "NSEvent", "NSGraphicsContext", "NSResponder", "NSImage"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSString", "NSValue", "NSData", "NSDate", "NSGeometry", "NSObject", "NSThread", "NSError", "NSURL"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSString", "NSValue", "NSData", "NSDate", "NSGeometry", "NSObject", "NSThread", "NSError", "NSURL", "NSProcessInfo"] }
 objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPNowPlayingInfoCenter", "MPMediaItem", "MPMediaEntity", "objc2-app-kit", "objc2-core-foundation"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]

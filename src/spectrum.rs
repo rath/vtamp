@@ -33,6 +33,10 @@ pub struct SpectrumFrame {
     /// Missing means unsupported, not silent. Additive within protocol 11.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channels: Option<SpectrumChannels>,
+    /// Why this server analyzes nothing for the current entry; absent when analysis
+    /// is possible. Additive within protocol 14.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -66,6 +70,7 @@ pub struct Spectrum {
     subscribers: AtomicUsize,
     playing: AtomicBool,
     current_id: Mutex<Option<String>>,
+    unavailable: Mutex<Option<String>>,
     frames: watch::Sender<SpectrumFrame>,
 }
 
@@ -121,6 +126,17 @@ impl Spectrum {
         }
     }
 
+    /// State why the current entry cannot be analyzed on this server, or clear it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn unavailable(&self, reason: Option<&str>) {
+        let mut current = self.unavailable.lock().unwrap();
+        if current.as_deref() != reason {
+            *current = reason.map(str::to_owned);
+            drop(current);
+            self.wake();
+        }
+    }
+
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn playing(&self, playing: bool) {
         if self.playing.swap(playing, Ordering::AcqRel) != playing {
@@ -156,12 +172,21 @@ impl Spectrum {
     pub(crate) fn tap(self: &Arc<Self>, source: Box<dyn Source + Send>) -> Tap {
         Tap {
             source,
+            feeder: self.feeder(),
+            pair: [0.0; 2],
+            channel: 0,
+        }
+    }
+
+    /// A block builder for a producer that already has stereo frames, such as the
+    /// native radio player's tap. It belongs to the analysis generation current now.
+    pub(crate) fn feeder(self: &Arc<Self>) -> Feeder {
+        Feeder {
             spectrum: self.clone(),
             generation: self.generation.load(Ordering::Acquire),
             epoch: self.epoch.load(Ordering::Acquire),
             pcm: [[0.0; BLOCK_SIZE]; 2],
             filled: 0,
-            channel: 0,
             sequence: 0,
         }
     }
@@ -177,6 +202,7 @@ impl Default for Spectrum {
             subscribers: AtomicUsize::new(0),
             playing: AtomicBool::new(false),
             current_id: Mutex::new(None),
+            unavailable: Mutex::new(None),
             frames: watch::channel(SpectrumFrame::inactive()).0,
         }
     }
@@ -194,21 +220,20 @@ impl Drop for Subscription {
     }
 }
 
-pub(crate) struct Tap {
-    source: Box<dyn Source + Send>,
+/// Collects 256-frame analysis blocks from a real-time producer. Every method is
+/// lock-free and allocation-free; the file tap and the radio tap both own one.
+pub(crate) struct Feeder {
     spectrum: Arc<Spectrum>,
     generation: u64,
     epoch: u64,
     pcm: [[f32; BLOCK_SIZE]; 2],
     filled: usize,
-    channel: usize,
     sequence: u64,
 }
-impl Iterator for Tap {
-    type Item = f32;
-    fn next(&mut self) -> Option<f32> {
-        let sample = self.source.next()?;
-        let channels = self.source.channels().get() as usize;
+impl Feeder {
+    /// Whether analysis wants frames now. A closed feeder drops its partial block,
+    /// and a new demand epoch restarts the block so stale samples never mix in.
+    fn open(&mut self) -> bool {
         let epoch = self.spectrum.epoch.load(Ordering::Acquire);
         if epoch != self.epoch {
             self.epoch = epoch;
@@ -217,29 +242,60 @@ impl Iterator for Tap {
         if self.spectrum.enabled()
             && self.generation == self.spectrum.generation.load(Ordering::Acquire)
         {
-            // Analyze mono or the front stereo pair; never sum opposing phases.
-            if self.channel < 2 {
-                self.pcm[self.channel][self.filled] = if sample.is_finite() { sample } else { 0.0 };
-            }
-            if self.channel + 1 == channels {
-                if channels == 1 {
-                    self.pcm[1][self.filled] = self.pcm[0][self.filled];
-                }
-                self.filled += 1;
-                if self.filled == BLOCK_SIZE {
-                    self.spectrum.samples.force_push(Samples {
-                        generation: self.generation,
-                        epoch,
-                        sequence: self.sequence,
-                        rate: self.source.sample_rate().get(),
-                        pcm: self.pcm,
-                    });
-                    self.sequence += 1;
-                    self.filled = 0;
-                }
-            }
+            true
         } else {
             self.filled = 0;
+            false
+        }
+    }
+    /// One frame of the front stereo pair; mono producers pass the sample twice.
+    pub(crate) fn push(&mut self, rate: u32, left: f32, right: f32) {
+        if !self.open() {
+            return;
+        }
+        self.pcm[0][self.filled] = if left.is_finite() { left } else { 0.0 };
+        self.pcm[1][self.filled] = if right.is_finite() { right } else { 0.0 };
+        self.filled += 1;
+        if self.filled == BLOCK_SIZE {
+            self.spectrum.samples.force_push(Samples {
+                generation: self.generation,
+                epoch: self.epoch,
+                sequence: self.sequence,
+                rate,
+                pcm: self.pcm,
+            });
+            self.sequence += 1;
+            self.filled = 0;
+        }
+    }
+    /// A gap in the signal, such as a seek: the analyzer restarts its window.
+    fn discontinuity(&mut self) {
+        self.filled = 0;
+        self.sequence += 1;
+    }
+}
+
+pub(crate) struct Tap {
+    source: Box<dyn Source + Send>,
+    feeder: Feeder,
+    pair: [f32; 2],
+    channel: usize,
+}
+impl Iterator for Tap {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        let sample = self.source.next()?;
+        let channels = self.source.channels().get() as usize;
+        // Analyze mono or the front stereo pair; never sum opposing phases.
+        if self.channel < 2 {
+            self.pair[self.channel] = sample;
+        }
+        if self.channel + 1 == channels {
+            if channels == 1 {
+                self.pair[1] = self.pair[0];
+            }
+            self.feeder
+                .push(self.source.sample_rate().get(), self.pair[0], self.pair[1]);
         }
         self.channel = (self.channel + 1) % channels;
         Some(sample)
@@ -262,9 +318,8 @@ impl Source for Tap {
         self.source.total_duration()
     }
     fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
-        self.filled = 0;
+        self.feeder.discontinuity();
         self.channel = 0;
-        self.sequence += 1;
         self.source.try_seek(pos)
     }
 }
@@ -406,6 +461,7 @@ impl Analyzer {
             high_hz: (self.key.2 as f32 / 2.0).min(16_000.0),
             levels,
             channels: Some(channels),
+            unavailable: spectrum.unavailable.lock().unwrap().clone(),
         };
         spectrum.frames.send_if_modified(|frame| {
             // Active frames are also liveness heartbeats: clients decay stale
@@ -711,5 +767,87 @@ mod tests {
         analyzer.update(&spectrum);
         assert!(spectrum.frames.borrow().active);
         assert_eq!(spectrum.frames.borrow().generation, 1);
+    }
+
+    #[test]
+    fn feeder_builds_the_same_blocks_as_the_file_tap() {
+        let drain = |spectrum: &Spectrum| {
+            std::iter::from_fn(|| spectrum.samples.pop())
+                .map(|b| (b.generation, b.epoch, b.sequence, b.rate, b.pcm))
+                .collect::<Vec<_>>()
+        };
+        let mut pcm = tone(44_100, 440.0, 0.5, -0.5);
+        pcm[3] = f32::NAN;
+        pcm[10] = f32::INFINITY;
+        let tapped = Arc::new(Spectrum::default());
+        let _tapped_subscription = tapped.subscribe();
+        tapped.playing(true);
+        tapped
+            .tap(Box::new(rodio::buffer::SamplesBuffer::new(
+                2.try_into().unwrap(),
+                44_100.try_into().unwrap(),
+                pcm.clone(),
+            )))
+            .for_each(drop);
+        let fed = Arc::new(Spectrum::default());
+        let _fed_subscription = fed.subscribe();
+        fed.playing(true);
+        let mut feeder = fed.feeder();
+        for pair in pcm.as_chunks::<2>().0 {
+            feeder.push(44_100, pair[0], pair[1]);
+        }
+        let blocks = drain(&fed);
+        assert_eq!(blocks.len(), FFT_SIZE / BLOCK_SIZE);
+        assert_eq!(
+            blocks[0].4[1][1], 0.0,
+            "non-finite samples analyze as silence"
+        );
+        assert_eq!(drain(&tapped), blocks);
+        // A feeder from before a reset belongs to the old generation and stays quiet;
+        // without demand or while stopped nothing is collected either.
+        fed.reset();
+        fed.playing(true);
+        for _ in 0..BLOCK_SIZE {
+            feeder.push(44_100, 0.5, 0.5);
+        }
+        let mut current = fed.feeder();
+        fed.playing(false);
+        for _ in 0..BLOCK_SIZE {
+            current.push(44_100, 0.5, 0.5);
+        }
+        assert!(fed.samples.is_empty());
+        fed.playing(true);
+        for _ in 0..BLOCK_SIZE {
+            current.push(44_100, 0.5, 0.5);
+        }
+        assert_eq!(fed.samples.len(), 1);
+    }
+
+    #[test]
+    fn unavailable_reason_reaches_frames_and_clears() {
+        let spectrum = Arc::new(Spectrum::default());
+        let mut subscription = spectrum.subscribe();
+        let mut analyzer = Analyzer::new();
+        subscription.frames.borrow_and_update();
+        spectrum.unavailable(Some("No analysis here"));
+        analyzer.update(&spectrum);
+        let frame = subscription.frames.borrow_and_update().clone();
+        assert!(!frame.active);
+        assert_eq!(frame.unavailable.as_deref(), Some("No analysis here"));
+        let json = serde_json::to_value(&frame).unwrap();
+        assert_eq!(json["unavailable"], "No analysis here");
+        // Unchanged inactive frames are not repeated.
+        analyzer.update(&spectrum);
+        assert!(!subscription.frames.has_changed().unwrap());
+        spectrum.unavailable(None);
+        analyzer.update(&spectrum);
+        let frame = subscription.frames.borrow_and_update().clone();
+        assert_eq!(frame.unavailable, None);
+        assert!(
+            serde_json::to_value(&frame)
+                .unwrap()
+                .get("unavailable")
+                .is_none()
+        );
     }
 }

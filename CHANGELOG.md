@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- The TUI spectrum works for live radio when the server runs macOS 27 or newer.
+  An `MTAudioProcessingTap` on the mix of the native player item copies the
+  decoded station audio into the same analysis as files, before volume; the
+  sound is unchanged. Older systems cannot tap HTTP Live Streaming audio, so the
+  panel names the requirement instead of an unexplained empty graph.
+- Spectrum frames may carry an `unavailable` reason. The field is additive
+  within protocol 14.
+
+### Upgrade notes
+
+- Restart the server with the new binary and reattach for the radio spectrum.
+
 ## [0.5.1] — 2026-10-09
 
 A server can serve its Library to apps over HTTP, and an iPhone app in `ios/`

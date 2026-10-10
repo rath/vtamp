@@ -886,7 +886,7 @@ pub async fn run(
             })?;
             app.sync_video();
             last_draw = Instant::now();
-            let wanted = app.spectrum_visible() && app.connected && !app.state.current().is_some_and(|item| item.track.is_live());
+            let wanted = app.spectrum_visible() && app.connected;
             spectrum_enabled.send_if_modified(|value| {
                 if *value == wanted { false } else { *value = wanted; true }
             });
@@ -1024,23 +1024,23 @@ impl App {
     }
 
     fn next_redraw(&self, last_draw: Instant) -> Option<Instant> {
+        let playing = self.connected && self.state.status == PlaybackStatus::Playing;
+        // Live radio has no progress gauge to keep moving.
         let live = self
             .state
             .current()
             .is_some_and(|item| item.track.is_live());
-        let playing = self.connected && self.state.status == PlaybackStatus::Playing && !live;
-        // Live radio has no spectrum: its panel holds a fixed notice and never consumes
-        // the redraw a track change leaves pending.
-        let animation =
-            if self.spectrum_visible() && !live && self.spectrum.needs_animation(playing) {
-                Some(last_draw + Duration::from_millis(50))
-            } else if playing && self.viewport.width >= 40 && self.viewport.height >= 12 {
-                // Keep the progress gauge responsive, including short tracks. Identical
-                // text/cells are discarded before sending anything to the terminal.
-                Some(last_draw + Duration::from_millis(100))
-            } else {
-                None
-            };
+        // A server that cannot analyze the current entry gets a fixed notice; drawing it
+        // consumes the pending redraw, so the animation timer settles.
+        let animation = if self.spectrum_visible() && self.spectrum.needs_animation(playing) {
+            Some(last_draw + Duration::from_millis(50))
+        } else if playing && !live && self.viewport.width >= 40 && self.viewport.height >= 12 {
+            // Keep the progress gauge responsive, including short tracks. Identical
+            // text/cells are discarded before sending anything to the terminal.
+            Some(last_draw + Duration::from_millis(100))
+        } else {
+            None
+        };
         let expiry = self.notice_at + Duration::from_secs(6);
         let notice = (Instant::now() < expiry).then_some(expiry);
         animation
@@ -3464,9 +3464,10 @@ mod tests {
     }
 
     #[test]
-    fn live_view_has_no_timeline_seek_or_animation_timer() {
+    fn live_view_has_no_timeline_or_seek_and_shows_the_servers_spectrum() {
         use ratatui::backend::TestBackend;
         let mut app = navigation_app(2);
+        app.connected = true;
         app.state.queue[0].track = crate::streams::Entry {
             name: "Radio".into(),
             url: "https://example.com/live".into(),
@@ -3477,28 +3478,28 @@ mod tests {
         app.state.stream_status = Some(StreamStatus::Reconnecting);
         app.notice_at = Instant::now() - Duration::from_secs(10);
         let (commands, mut requests) = mpsc::channel(8);
-        // A shown spectrum panel holds a fixed notice for radio; the redraw a track
-        // change leaves pending must not keep the 20 Hz timer running.
+        let render = |app: &mut App, width, height| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+        };
+        const SIZES: [(u16, u16); 3] = [(40, 12), (72, 20), (120, 36)];
+        // Without frames, radio settles like a paused file: no notice, no timer.
         for spectrum in [false, true] {
             app.spectrum.enabled = spectrum;
             app.spectrum.clear();
-            for (width, height) in [(40, 12), (72, 20), (120, 36)] {
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                let text = terminal
-                    .backend()
-                    .buffer()
-                    .content()
-                    .iter()
-                    .map(|c| c.symbol())
-                    .collect::<String>();
+            for (width, height) in SIZES {
+                let text = render(&mut app, width, height);
                 assert!(text.contains("Reconnecting"));
                 assert!(!text.contains("0:00 /"));
-                assert_eq!(
-                    text.contains("Spectrum unavailable"),
-                    spectrum,
-                    "{width}×{height}"
-                );
+                assert!(!text.contains("unavailable"), "{width}×{height}");
+                assert_eq!(text.contains("SPECTRUM"), spectrum, "{width}×{height}");
                 assert!(
                     app.next_redraw(Instant::now()).is_none(),
                     "spectrum {spectrum} at {width}×{height}"
@@ -3508,10 +3509,38 @@ mod tests {
         app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &commands)
             .unwrap();
         assert!(requests.try_recv().is_err());
-        // A file track draws the pending spectrum frame on the animation timer again.
-        app.state.current_id = Some(app.state.queue[1].id.clone());
-        let now = Instant::now();
-        assert_eq!(app.next_redraw(now), Some(now + Duration::from_millis(50)));
+        app.notice_at = Instant::now() - Duration::from_secs(10);
+        // A server that cannot analyze radio says why. The notice holds still, so the
+        // 20 Hz timer stays off while it shows.
+        app.state.stream_status = Some(StreamStatus::Live);
+        app.spectrum.enabled = true;
+        app.spectrum.accept(SpectrumFrame {
+            current_id: app.state.current_id.clone(),
+            unavailable: Some("Radio spectrum needs macOS 27 or newer on the server".into()),
+            ..SpectrumFrame::default()
+        });
+        for (width, height) in SIZES {
+            let text = render(&mut app, width, height);
+            assert!(text.contains("Radio spectrum"), "{width}×{height}");
+            assert!(
+                app.next_redraw(Instant::now()).is_none(),
+                "{width}×{height}"
+            );
+        }
+        // Analyzed radio animates exactly like a file.
+        app.spectrum.accept(SpectrumFrame {
+            active: true,
+            current_id: app.state.current_id.clone(),
+            levels: [0.5; crate::spectrum::BANDS],
+            ..SpectrumFrame::default()
+        });
+        for (width, height) in SIZES {
+            let text = render(&mut app, width, height);
+            assert!(!text.contains("Radio spectrum"), "{width}×{height}");
+            assert!(text.contains('█'), "{width}×{height}");
+            let now = Instant::now();
+            assert_eq!(app.next_redraw(now), Some(now + Duration::from_millis(50)));
+        }
     }
 
     #[test]

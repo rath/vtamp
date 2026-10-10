@@ -246,6 +246,19 @@ impl SpectrumView {
         self.error = None;
         self.received = Instant::now();
     }
+    /// Why the server cannot analyze the current entry, while it produces nothing.
+    pub fn unavailable(&self) -> Option<&str> {
+        self.frame
+            .as_ref()
+            .filter(|frame| !frame.active)
+            .and_then(|frame| frame.unavailable.as_deref())
+    }
+    /// The panel showed a fixed message instead of the graph: consume the pending
+    /// redraw and leave nothing to animate, so the animation timer settles.
+    pub fn notice_drawn(&mut self) {
+        self.reset_levels();
+        self.redraw = false;
+    }
     /// Draws the panel; `cell` is the terminal cell size in pixels, which keeps the
     /// radial style round.
     pub fn draw(

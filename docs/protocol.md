@@ -93,6 +93,13 @@ both channels equally. Channel magnitudes use full channel power, while `levels`
 uses the mean of the two powers before band reduction and dB conversion. The
 existing two FFTs supply all three outputs; capture and playback are unchanged.
 
+An optional `unavailable` string states why the server analyzes nothing for the
+current entry: `Radio spectrum needs macOS 27 or newer on the server`, or
+`Spectrum unavailable for this station` when the system refused a tap. Clients
+show it in place of the graph while frames are inactive. This is an additive
+protocol-14 extension; older clients ignore it, and a missing field means no
+reason is known.
+
 The stream publishes at up to 20 Hz. Frames are disposable: each subscriber keeps
 the latest value, socket writes have a two-second deadline, and EOF releases its
 subscription. There is no replay, persistence, or playback revision change.
@@ -106,7 +113,9 @@ A seek, reload, or output reset changes `generation`; clients discard old result
 and clear their peaks. Pause/resume also flushes internal capture epochs.
 
 Prepared PCM in the output format is observed before app volume, without changing
-the samples sent to the output. Stereo channels contribute power independently,
+the samples sent to the output. Live radio is observed through an
+`MTAudioProcessingTap` on the mix of the native player item (macOS 27 or newer),
+also before volume and without changing the audio. Stereo channels contribute power independently,
 avoiding phase cancellation; multichannel outputs use their front pair. Stale
 samples produce an
 inactive zero frame. TUI clients additionally reject a frame for a different
@@ -242,7 +251,8 @@ the registered URL, resolving redirects again. Native stalls get a 20-second
 watchdog and capped exponential reconnect backoff. Unsupported/missing resources
 pause with `last_error`. Network endings never trigger natural queue advancement.
 Seek is unsupported, as is `stop_after_current`; deadline sleep timers still work.
-SpectrumWatch remains available but radio provides inactive frames. System Now
+SpectrumWatch analyzes radio on macOS 27 or newer while the station is LIVE;
+older systems send inactive frames with `unavailable`. System Now
 Playing marks live media and disables timeline seeking.
 
 Database version 6 adds a separate stream registry and a combined catalog view.

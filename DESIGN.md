@@ -285,8 +285,11 @@ player replaces its progress gauge with Connecting / Buffering / LIVE /
 Reconnecting; paused live media reads LIVE · PAUSED. A stream carries no artwork
 to load, so the cover slot reads Live stream instead of the No album art label
 used for files. Seek keys explain that live radio cannot seek. The spectrum area
-shows an honest unavailable message and keeps its toggle preference, without
-simulated animation, an animation timer, or an active subscription.
+treats a station like a file: it subscribes, settles while connecting, buffering,
+or reconnecting, and animates once analyzed frames arrive. When the server reports
+why it cannot analyze the station (an older macOS, or a refused tap), the panel
+shows that reason and `v closes · Tab lists` instead of the graph; the notice
+does not animate and keeps no animation timer.
 
 The a prompt accepts folders, URLs, and local M3U/PLS lists. A non-YouTube HTTP(S)
 URL opens a centered channel-name prompt using the shared grapheme editor and real
