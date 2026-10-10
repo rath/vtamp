@@ -57,8 +57,17 @@ final class VideoRenderer: VideoSink {
         case idle
         case loading
         case showing(width: Int, height: Int)
+        /// Keep the last picture while decoding catches up with the audio.
+        case holding(width: Int, height: Int)
         /// The picture cannot be shown; the audio is unaffected.
         case unavailable(String)
+
+        var videoSize: (width: Int, height: Int)? {
+            switch self {
+            case let .showing(width, height), let .holding(width, height): (width, height)
+            default: nil
+            }
+        }
     }
 
     private static let preferenceKey = "showVideo"
@@ -68,7 +77,7 @@ final class VideoRenderer: VideoSink {
     /// The saved choice between the video and the cover, like the TUI's `w`.
     var preferred: Bool {
         didSet {
-            UserDefaults.standard.set(preferred, forKey: Self.preferenceKey)
+            defaults.set(preferred, forKey: Self.preferenceKey)
             update()
         }
     }
@@ -90,6 +99,8 @@ final class VideoRenderer: VideoSink {
     }
 
     @ObservationIgnored let layer = AVSampleBufferDisplayLayer()
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let session: URLSession
     @ObservationIgnored private let client: () -> VtampClient?
     @ObservationIgnored private var track: Track?
     @ObservationIgnored private var timebase: CMTimebase?
@@ -97,18 +108,26 @@ final class VideoRenderer: VideoSink {
     @ObservationIgnored private var pump: Task<Void, Never>?
     @ObservationIgnored private var restartAt: CMTime?
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var readRevision = 0
+    @ObservationIgnored private var readiness: (id: UUID, continuation: CheckedContinuation<Void, Never>)?
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var tokens: [any NSObjectProtocol] = []
 
-    init(client: @escaping () -> VtampClient?) {
+    init(session: URLSession = .shared, defaults: UserDefaults = .standard, client: @escaping () -> VtampClient?) {
         self.client = client
-        preferred = UserDefaults.standard.object(forKey: Self.preferenceKey) as? Bool ?? true
+        self.session = session
+        self.defaults = defaults
+        preferred = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
         layer.videoGravity = .resizeAspect
         let renderer = layer.sampleBufferRenderer
         let center = NotificationCenter.default
         tokens = [
             center.addObserver(forName: AVSampleBufferVideoRenderer.didFailToDecodeNotification, object: renderer, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.fail("Video decoding failed") }
+                MainActor.assumeIsolated {
+                    guard let self, self.attached != nil, self.renderer.status == .failed else { return }
+                    self.fail("Video decoding failed")
+                }
             },
             center.addObserver(forName: AVSampleBufferVideoRenderer.requiresFlushToResumeDecodingDidChangeNotification, object: renderer, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.flushIfRequired() }
@@ -123,9 +142,7 @@ final class VideoRenderer: VideoSink {
     func trackChanged(_ track: Track?) {
         self.track = track
         timebase = nil
-        if attached?.trackID != track?.id {
-            detach()
-        }
+        detach()
     }
 
     func ready(track: Track, timebase: CMTimebase?) {
@@ -137,7 +154,10 @@ final class VideoRenderer: VideoSink {
     func seek(to seconds: TimeInterval) {
         guard attached != nil else { return }
         restartAt = CMTime(seconds: max(0, seconds), preferredTimescale: MatroskaFile.nanosecond.timescale)
-        renderer.flush()
+        readRevision += 1
+        holdPicture()
+        flush(removingDisplayedImage: false)
+        finishReadinessWait()
     }
 
     func stopped() {
@@ -151,7 +171,7 @@ final class VideoRenderer: VideoSink {
     /// The app left the foreground: stop decoding, keep the choice.
     func suspend() {
         suspended = true
-        detach()
+        detach(keepingPicture: true)
     }
 
     func resume() {
@@ -162,12 +182,16 @@ final class VideoRenderer: VideoSink {
     // MARK: Session
 
     private func update() {
-        guard wanted, preferred, !suspended, let track, track.video, let timebase, let client = client() else {
+        guard preferred, let track, track.video else {
             detach()
             return
         }
+        guard wanted, !suspended, let timebase, let client = client() else {
+            detach(keepingPicture: true)
+            return
+        }
         if let attached, attached.trackID == track.id, attached.timebase === timebase { return }
-        detach()
+        detach(keepingPicture: true)
         attach(track: track, timebase: timebase, url: client.videoURL(for: track))
     }
 
@@ -175,20 +199,25 @@ final class VideoRenderer: VideoSink {
         generation += 1
         let generation = generation
         attached = (track.id, timebase)
-        state = .loading
+        if state.videoSize == nil { state = .loading }
+        let session = session
         pump = Task { [weak self] in
             do {
-                let source = try await HTTPByteSource.open(url)
+                let source = try await HTTPByteSource.open(url, session: session)
+                // Includes speculative range requests, which are not children of this task.
+                defer { Task { await source.cancel() } }
+                try Task.checkCancellation()
                 let file = try await MatroskaFile.open(source)
-                let frames = try Self.frameSource(for: file)
+                try Task.checkCancellation()
                 guard let self, generation == self.generation else { return }
+                let frames = try Self.frameSource(for: file)
+                await flushTask?.value
+                guard generation == self.generation else { return }
                 layer.controlTimebase = timebase
-                state = .showing(width: file.track.displayWidth, height: file.track.displayHeight)
                 await frames.start(at: file.cue(before: timebase.time))
                 try await feed(frames, file: file, generation: generation)
             } catch {
-                guard let self, generation == self.generation else { return }
-                attached = nil
+                guard !Task.isCancelled, let self, generation == self.generation else { return }
                 fail(Self.message(for: error))
             }
         }
@@ -214,11 +243,21 @@ final class VideoRenderer: VideoSink {
 
     private func feed(_ frames: any FrameSource, file: MatroskaFile, generation: Int) async throws {
         while generation == self.generation {
+            try Task.checkCancellation()
+            let revision = readRevision
             if let restartAt {
                 self.restartAt = nil
+                await flushTask?.value
+                guard generation == self.generation else { return }
+                guard revision == readRevision else { continue }
                 await frames.start(at: file.cue(before: restartAt))
             }
-            guard let sample = try await frames.next() else {
+            guard generation == self.generation else { return }
+            guard revision == readRevision else { continue }
+            let next = try await frames.next()
+            guard generation == self.generation else { return }
+            guard revision == readRevision else { continue }
+            guard let sample = next else {
                 // The picture ended; the audio decides when the track does.
                 while generation == self.generation, restartAt == nil {
                     try await Task.sleep(for: .milliseconds(250))
@@ -227,35 +266,91 @@ final class VideoRenderer: VideoSink {
             }
             await untilReadyForMoreData()
             guard generation == self.generation else { return }
-            if restartAt != nil { continue }
+            guard revision == readRevision, let timebase = attached?.timebase else { continue }
+            // Re-read the audio clock AFTER network and renderer backpressure.
+            // Decode the preroll too: later compressed frames depend on it.
+            let visible = Self.prepareForDisplay(sample, at: timebase.time, defaultDuration: file.track.defaultDuration)
             renderer.enqueue(sample)
             framesEnqueued += 1
+            if visible {
+                state = .showing(width: file.track.displayWidth, height: file.track.displayHeight)
+            }
         }
+    }
+
+    /// A sample whose display interval has ended must never flash on screen.
+    /// This also handles reordered PTS: every sample is checked independently.
+    static func prepareForDisplay(_ sample: CMSampleBuffer, at time: CMTime, defaultDuration: CMTime?) -> Bool {
+        let duration: CMTime
+        if sample.duration.isNumeric, sample.duration > .zero {
+            duration = sample.duration
+        } else if let fallback = defaultDuration, fallback.isNumeric, fallback > .zero {
+            duration = fallback
+        } else {
+            duration = CMTime(value: 1, timescale: 30)
+        }
+        let visible = time.isNumeric && sample.presentationTimeStamp.isNumeric
+            && sample.presentationTimeStamp + duration > time
+        sample.sampleAttachments[0][.doNotDisplay] = !visible
+        return visible
     }
 
     private func untilReadyForMoreData() async {
         guard !renderer.isReadyForMoreMediaData else { return }
+        let id = UUID()
         await withCheckedContinuation { continuation in
+            readiness = (id, continuation)
             renderer.requestMediaDataWhenReady(on: .main) { [weak self] in
                 MainActor.assumeIsolated {
-                    self?.renderer.stopRequestingMediaData()
-                    continuation.resume()
+                    guard let self, self.readiness?.id == id else { return }
+                    self.finishReadinessWait()
                 }
             }
         }
     }
 
-    private func detach() {
+    private func finishReadinessWait() {
+        renderer.stopRequestingMediaData()
+        let waiting = readiness
+        readiness = nil
+        waiting?.continuation.resume()
+    }
+
+    private func holdPicture() {
+        if let size = state.videoSize {
+            state = .holding(width: size.width, height: size.height)
+        }
+    }
+
+    /// Flush completion is a barrier before a new generation enqueues anything.
+    private func flush(removingDisplayedImage: Bool) {
+        let (events, completion) = AsyncStream<Void>.makeStream()
+        renderer.flush(removingDisplayedImage: removingDisplayedImage) {
+            completion.finish()
+        }
+        let previous = flushTask
+        flushTask = Task {
+            await previous?.value
+            for await _ in events {}
+        }
+    }
+
+    private func detach(keepingPicture: Bool = false) {
         generation += 1
         pump?.cancel()
         pump = nil
         restartAt = nil
         attached = nil
-        renderer.stopRequestingMediaData()
-        renderer.flush(removingDisplayedImage: true, completionHandler: nil)
+        finishReadinessWait()
+        flush(removingDisplayedImage: !keepingPicture)
         layer.controlTimebase = nil
         framesEnqueued = 0
-        if case .unavailable = state {} else { state = .idle }
+        if keepingPicture, state.videoSize != nil {
+            holdPicture()
+        } else if case .unavailable = state {
+        } else {
+            state = .idle
+        }
     }
 
     private func fail(_ message: String) {
@@ -265,8 +360,7 @@ final class VideoRenderer: VideoSink {
 
     private func flushIfRequired() {
         guard renderer.requiresFlushToResumeDecoding, let timebase = attached?.timebase else { return }
-        restartAt = timebase.time
-        renderer.flush()
+        seek(to: timebase.time.seconds)
     }
 
     private static func message(for error: any Error) -> String {

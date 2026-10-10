@@ -164,6 +164,57 @@ final class VtampUITests: XCTestCase {
         app.buttons["Close"].tap()
     }
 
+    /// Use a synthetic clip at least 60 seconds long, with widely spaced
+    /// keyframes, to exercise foreground re-entry between keyframes.
+    @MainActor
+    func testSavedVideoBackgroundResume() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["VTAMP_SERVER"] = server
+        app.launchEnvironment["VTAMP_MUTED"] = "1"
+        app.launchArguments += ["-showVideo", "YES"]
+        app.launch()
+        let clip = row(app, "Resume Clip")
+        guard clip.waitForExistence(timeout: 10) else {
+            throw XCTSkip("The server has no synthetic Resume Clip of at least 60 seconds")
+        }
+        clip.tap()
+        let pause = app.buttons["Pause"].firstMatch
+        if !pause.waitForExistence(timeout: 4) { clip.press(forDuration: 0.1) }
+        XCTAssertTrue(pause.waitForExistence(timeout: 15))
+        let position = app.sliders["Position"].firstMatch
+        let framed = NSPredicate { element, _ in
+            guard let value = (element as? XCUIElement)?.value as? String,
+                  let frames = Int(value.split(separator: " ").first ?? "") else { return false }
+            return frames > 0
+        }
+        for fullscreen in [false, true] {
+            if fullscreen { app.buttons["fullscreen"].tap() }
+            let identifier = fullscreen ? "fullscreenVideo" : "video"
+            let video = app.descendants(matching: .any)[identifier].firstMatch
+            XCTAssertTrue(video.waitForExistence(timeout: 15))
+            wait(for: [expectation(for: framed, evaluatedWith: video)], timeout: 15)
+            if fullscreen, !position.exists {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            let before = try seconds(position)
+            let size = video.frame.size
+            snapshot(app, "resume-\(identifier)-before")
+            XCUIDevice.shared.press(.home)
+            Thread.sleep(forTimeInterval: 9)
+            app.activate()
+            XCTAssertTrue(video.waitForExistence(timeout: 5), "The same video surface survives re-entry")
+            snapshot(app, "resume-\(identifier)-return")
+            XCTAssertEqual(video.frame.size, size, "Holding the picture must not change its layout")
+            if fullscreen, !position.exists {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            XCTAssertTrue(position.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(try seconds(position) - before, 8, "Audio kept playing")
+            wait(for: [expectation(for: framed, evaluatedWith: video)], timeout: 15)
+            snapshot(app, "resume-\(identifier)-playing")
+        }
+    }
+
     /// The slider's `m:ss` value in seconds.
     private func seconds(_ slider: XCUIElement) throws -> Int {
         let text = try XCTUnwrap(slider.value as? String)

@@ -66,6 +66,12 @@ to the portrait player. Video decodes only while the player or the full-screen
 view is on screen and the app is in the foreground: closing the sheet, locking
 the phone, or switching apps stops the demuxer, the decoder, and the video
 downloads, and the audio is never affected by a video that cannot be shown.
+When you return to the same video, the last picture stays still while decoding
+catches up to the current audio position. Earlier frames are decoded without
+being displayed, so returning never plays a burst of old footage. The player
+keeps the video's aspect ratio and full-screen presentation during this wait;
+changing tracks or choosing Cover clears the old picture. Audio keeps playing
+at its normal speed throughout.
 Outside the full-screen video the app stays in portrait.
 
 ### Live radio
@@ -170,6 +176,14 @@ TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
   -only-testing:VtampUITests test
 VTAMP_HOME="$vtamp_test_home" target/release/vtamp server stop
 ```
+
+The background-video regression additionally looks for **Resume Clip**, a
+synthetic video at least 60 seconds long with spaced keyframes (for example,
+H.264 at 30 fps with an eight-second GOP). It backgrounds the player for nine
+seconds in both portrait and full-screen video, checks continued audio and
+stable layout, and attaches before/return/playing screenshots. Without that
+fixture this case is skipped. Timestamp admission and cancellation are covered
+separately by renderer unit tests; screenshots alone do not prove smooth motion.
 
 To point a manual simulator run at a server, launch with
 `SIMCTL_CHILD_VTAMP_SERVER=http://127.0.0.1:8711/api`; `SIMCTL_CHILD_VTAMP_MUTED=1`

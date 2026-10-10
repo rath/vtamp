@@ -54,6 +54,7 @@ struct DataByteSource: ByteSource {
     var length: Int64 { Int64(data.count) }
 
     func read(_ range: Range<Int64>) async throws -> Data {
+        try Task.checkCancellation()
         guard range.lowerBound >= 0, range.upperBound <= length else { throw VideoError.truncated }
         let start = data.startIndex + Int(range.lowerBound)
         return Data(data[start..<(start + range.count)])
@@ -73,6 +74,7 @@ actor HTTPByteSource: ByteSource {
     private let etag: String?
     private var chunks: [Int64: Data] = [:]
     private var recent: [Int64] = []
+    private var cancelled = false
     private var inflight: [Int64: Task<Data, any Error>] = [:]
 
     /// `HEAD` the file first: its length and validator.
@@ -96,6 +98,7 @@ actor HTTPByteSource: ByteSource {
     }
 
     func read(_ range: Range<Int64>) async throws -> Data {
+        try Task.checkCancellation()
         guard range.lowerBound >= 0, range.upperBound <= length else { throw VideoError.truncated }
         guard !range.isEmpty else { return Data() }
         var result = Data(capacity: range.count)
@@ -109,6 +112,7 @@ actor HTTPByteSource: ByteSource {
             guard start <= end else { throw VideoError.truncated }
             result.append(chunk[chunk.startIndex + start..<chunk.startIndex + end])
         }
+        try Task.checkCancellation()
         // Sequential readers get the next chunk fetched while they decode this one.
         if range.upperBound - last * Self.chunkSize > Self.chunkSize * 3 / 4, (last + 1) * Self.chunkSize < length {
             prefetch(last + 1)
@@ -116,7 +120,18 @@ actor HTTPByteSource: ByteSource {
         return result
     }
 
+    /// Cancel all reads, including speculative fetches, when the video is hidden.
+    func cancel() {
+        cancelled = true
+        for task in inflight.values { task.cancel() }
+        inflight.removeAll()
+        chunks.removeAll()
+        recent.removeAll()
+    }
+
     private func chunk(_ index: Int64) async throws -> Data {
+        try Task.checkCancellation()
+        guard !cancelled else { throw CancellationError() }
         if let cached = chunks[index] {
             touch(index)
             return cached
@@ -124,7 +139,13 @@ actor HTTPByteSource: ByteSource {
         let task = inflight[index] ?? fetchTask(index)
         inflight[index] = task
         defer { inflight[index] = nil }
-        let data = try await task.value
+        let data = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        try Task.checkCancellation()
+        guard !cancelled else { throw CancellationError() }
         chunks[index] = data
         touch(index)
         while recent.count > Self.cachedChunks, let oldest = recent.first {
@@ -135,7 +156,7 @@ actor HTTPByteSource: ByteSource {
     }
 
     private func prefetch(_ index: Int64) {
-        guard chunks[index] == nil, inflight[index] == nil else { return }
+        guard !cancelled, chunks[index] == nil, inflight[index] == nil else { return }
         inflight[index] = fetchTask(index)
     }
 

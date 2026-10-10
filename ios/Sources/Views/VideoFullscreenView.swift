@@ -6,6 +6,7 @@ struct VideoFullscreenView: View {
     @Environment(Player.self) private var player
     @Environment(VideoRenderer.self) private var video
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var controls = true
     @State private var scrubbing = false
 
@@ -13,7 +14,7 @@ struct VideoFullscreenView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             switch video.state {
-            case .showing:
+            case .showing, .holding:
                 VideoSurface(layer: video.layer)
                     .ignoresSafeArea()
                     .accessibilityElement()
@@ -43,6 +44,10 @@ struct VideoFullscreenView: View {
             video.show(.fullscreen, true)
             // The player widened the mask before presenting this view.
             Orientation.turn(to: .landscapeRight)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Going Home can restore portrait while this cover remains presented.
+            if phase == .active { Orientation.turn(to: .landscapeRight) }
         }
         .onDisappear {
             video.show(.fullscreen, false)

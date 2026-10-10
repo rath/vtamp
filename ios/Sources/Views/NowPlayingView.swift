@@ -147,8 +147,8 @@ struct NowPlayingView: View {
     /// one home at a time, so the sheet leaves it to the full-screen view.
     private var artwork: some View {
         ZStack {
-            if case let .showing(width, height) = video.state {
-                let aspect = CGFloat(max(width, 1)) / CGFloat(max(height, 1))
+            if let size = video.state.videoSize {
+                let aspect = CGFloat(max(size.width, 1)) / CGFloat(max(size.height, 1))
                 if fullscreen {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(.black)
