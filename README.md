@@ -1050,6 +1050,12 @@ cargo build --release --locked
 
 Core tests use a fake audio backend. Process integration tests run isolated real servers and cover concurrent startup, subscriptions, persistence, malformed requests, and stale-socket recovery without requiring an audio device. A tiny original synthesized AAC fixture tests extended-size MP4 `mdat` metadata and decoding in CI.
 
+With installed yt-dlp, FFmpeg (libx264, libaom-av1, libvpx-vp9), and FFprobe,
+`cargo test --locked --lib youtube::tests::real_section_downloads_align_audio_and_encoded_video -- --ignored`
+checks excerpt sync using generated pictures and audio on loopback. It covers
+AV1/VP9 sources, seeks, short/open-ended clips, chapter cleanup, and packet
+preservation for full downloads; no YouTube, cookies, or LLM is used.
+
 Headless cast tests wait for published Ogg pages separately from playback
 completion: encoding and page buffering can make them observable at different times.
 

@@ -930,7 +930,11 @@ fn archive_real_video_exports_sound_and_restores_silent_sidecar_without_reencodi
         "color=c=blue:s=32x32:r=10:d=1",
         "-an",
         "-c:v",
-        "ffv1",
+        "libx264",
+        "-bf",
+        "0",
+        "-metadata:s:v:0",
+        crate::video::EXACT_CLIP_TAG,
         silent.to_str().unwrap(),
     ]);
     let video_time = 1_640_000_789;
@@ -1000,6 +1004,16 @@ fn archive_real_video_exports_sound_and_restores_silent_sidecar_without_reencodi
             &AtomicBool::new(false),
         )
         .unwrap();
+    assert!(
+        crate::video::probe(
+            &restored_dir.join("video.mkv"),
+            &crate::import_config::Config::default(),
+            &crate::subprocess::cancel()
+        )
+        .unwrap()
+        .exact_clip,
+        "archive round trips retain corrected clip timing and its stream tag"
+    );
     assert_eq!(
         packet_hashes(&restored_dir.join("video.mkv"), "v:0"),
         packet_hashes(&silent, "v:0")

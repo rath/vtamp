@@ -472,7 +472,11 @@ impl Store {
     /// Record a published video sidecar on an indexed track. Returns the track
     /// as stored, or `None` when the file is not indexed yet; the next scan
     /// then detects the sidecar itself.
-    pub fn set_video(&mut self, id: &str) -> Result<Option<Track>> {
+    pub fn set_video(
+        &mut self,
+        id: &str,
+        audio: Option<&crate::imports::AudioFile>,
+    ) -> Result<Option<Track>> {
         let json: Option<String> = self
             .db
             .query_row("SELECT json FROM tracks WHERE id=?1", [id], |r| r.get(0))
@@ -481,8 +485,19 @@ impl Store {
             return Ok(None);
         };
         let mut record: Record = serde_json::from_str(&json)?;
-        if !record.track.video {
+        if !record.track.video
+            || audio.is_some_and(|audio| {
+                record.track.duration_ms != Some(audio.duration_ms)
+                    || record.modified != audio.modified
+                    || record.bytes != audio.bytes
+            })
+        {
             record.track.video = true;
+            if let Some(audio) = audio {
+                record.track.duration_ms = Some(audio.duration_ms);
+                record.modified = audio.modified;
+                record.bytes = audio.bytes;
+            }
             let tx = self.db.transaction()?;
             imports::write_record(&tx, &record)?;
             tx.commit()?;
@@ -1094,9 +1109,14 @@ mod tests {
             .unwrap();
         assert_eq!((page.kind, page.total), (Some(Kind::Video), 1));
         // A published sidecar flips the indexed row without a rescan.
-        assert!(store.set_video("song").unwrap().is_some_and(|t| t.video));
+        assert!(
+            store
+                .set_video("song", None)
+                .unwrap()
+                .is_some_and(|t| t.video)
+        );
         assert_eq!(store.search("", Some(Kind::Video), 0, 10).unwrap().1, 2);
-        assert!(store.set_video("missing").unwrap().is_none());
+        assert!(store.set_video("missing", None).unwrap().is_none());
     }
 
     #[test]

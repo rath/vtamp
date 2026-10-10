@@ -43,7 +43,9 @@ The macOS server integrates with media keys and Now Playing, including track met
 
 An installed `yt-dlp` enables optional audio imports with per-job consent to save
 video up to 480p. Single videos can be saved as time ranges; full downloads and
-different excerpts coexist, with the same interval applied to audio and video. On macOS, saved video plays in the cover area through Kitty or
+different excerpts coexist, with the same interval applied to audio and video.
+Excerpt video is re-encoded to H.264 for accurate sync; full video preserves its
+source codec. On macOS, saved video plays in the cover area through Kitty or
 Sixel and follows the server audio; `w` switches video/cover and `F` toggles
 fullscreen within the current terminal pane. Existing audio-only
 imports can gain video without changing their identity or queue. Without it, the interface,

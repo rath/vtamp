@@ -1634,6 +1634,7 @@ mod tests {
                 width: 64,
                 height: 48,
                 duration: 60.0,
+                exact_clip: false,
             },
             &config,
             &request,

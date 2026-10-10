@@ -22,6 +22,7 @@ impl Harness {
         fs::create_dir(&bin).unwrap();
         let fixture =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/extended-mdat.m4a");
+        fs::copy(&fixture, bin.join("clean-audio.m4a")).unwrap();
         image::RgbImage::from_pixel(16, 9, image::Rgb([40, 120, 180]))
             .save(bin.join("art.png"))
             .unwrap();
@@ -75,7 +76,19 @@ print('VTAMP_FILE '+json.dumps(str(out)))
             fixture = serde_json::to_string(&fixture).unwrap()
         );
         fs::write(bin.join("yt-dlp"), script).unwrap();
-        fs::write(bin.join("ffmpeg"),"#!/usr/bin/python3\nimport sys,shutil,json,pathlib\na=sys.argv[1:]\nif '-show_streams' in a:\n if pathlib.Path(a[-1]).read_bytes()!=b'SILENT VIDEO': sys.exit(1)\n print(json.dumps({'streams':[{'codec_type':'video','width':854,'height':480}],'format':{'duration':'60'}}));sys.exit(0)\nif '-i' in a: shutil.copyfile(a[a.index('-i')+1],a[-1])\nelse: print('fake 1')\n").unwrap();
+        fs::write(bin.join("ffmpeg"), r#"#!/usr/bin/python3
+import sys,shutil,json,pathlib
+a=sys.argv[1:]
+if '-show_streams' in a:
+ data=pathlib.Path(a[-1]).read_bytes()
+ if not data.startswith(b'SILENT VIDEO'): sys.exit(1)
+ print(json.dumps({'streams':[{'codec_type':'video','codec_name':'h264','start_time':'0.000000','width':854,'height':480,'tags':{'VTAMP_CLIP_TIMING':'1'} if data.endswith(b'EXACT') else {}}],'format':{'duration':'60'}}));sys.exit(0)
+if '-i' in a:
+ source=pathlib.Path(__file__).parent/'clean-audio.m4a' if pathlib.Path(a[-1]).name=='audio.m4a' and '-map_chapters' in a else a[a.index('-i')+1]
+ shutil.copyfile(source,a[-1])
+ if 'VTAMP_CLIP_TIMING=1' in a: pathlib.Path(a[-1]).write_bytes(b'SILENT VIDEO EXACT')
+else: print('fake 1')
+"#).unwrap();
         for name in ["yt-dlp", "ffmpeg"] {
             fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o700)).unwrap();
         }
@@ -135,7 +148,7 @@ impl Drop for Harness {
 const URL: &str = "https://www.youtube.com/watch?v=lO3lG-qXU14";
 
 #[test]
-fn video_copying_progress_advances_without_network_transfer_updates() {
+fn video_encoding_progress_advances_without_network_transfer_updates() {
     let h = Harness::new();
     h.ok(&["server", "start", "--headless"]);
     h.ok(&["volume", "0"]);
@@ -286,8 +299,22 @@ fn ranges_coexist_deduplicate_upgrade_rescan_and_delete_independently() {
         .collect();
     assert_eq!(clips.len(), 3, "two audio excerpts and one video upgrade");
     for args in clips {
-        assert!(args.iter().any(|s| s == "--no-force-keyframes-at-cuts"));
-        assert!(!args.iter().any(|s| s == "--force-keyframes-at-cuts"));
+        let video = args
+            .iter()
+            .any(|s| s == "bestvideo[height<=480]/best[height<=480]");
+        assert_eq!(args.iter().any(|s| s == "--force-keyframes-at-cuts"), video);
+        assert_eq!(
+            args.iter().any(|s| s == "--no-force-keyframes-at-cuts"),
+            !video
+        );
+        if video {
+            assert!(
+                args.iter()
+                    .any(|s| s.contains("-c:v libx264") && s.contains("-bf 0"))
+            );
+        } else {
+            assert!(args.iter().any(|s| s == "--no-embed-chapters"));
+        }
         assert!(args.iter().any(|s| s == "--ffmpeg-location"));
     }
 }
@@ -1019,7 +1046,11 @@ fn video_opt_in_preserves_music_and_is_not_scanned_as_a_track() {
     assert_eq!(result["job"]["added"], 1);
     assert_eq!(result["items"][0]["video_status"], "ready");
     let folder = h.home.path().join("imports/youtube/lO3lG-qXU14");
-    assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+    assert!(
+        fs::read(folder.join("video.mkv"))
+            .unwrap()
+            .starts_with(b"SILENT VIDEO")
+    );
     let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
     assert!(calls.contains("bestvideo[height<=480]/best[height<=480]"));
     h.ok(&["library", "scan", "--wait"]);
@@ -1193,12 +1224,20 @@ fn published_video_survives_report_failure_and_audio_repair() {
         fs::remove_file(folder.join("audio.m4a")).unwrap();
         let repaired = h.add_range(clipped, &["--audio-only", "--wait"]);
         assert_eq!(repaired["items"][0]["track_id"], track);
-        assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+        assert!(
+            fs::read(folder.join("video.mkv"))
+                .unwrap()
+                .starts_with(b"SILENT VIDEO")
+        );
         // Corrupt sidecars are replaceable, without a second audio download.
         fs::write(folder.join("video.mkv"), b"damaged").unwrap();
         let replaced = h.add_range(clipped, &["--video", "--wait"]);
         assert_eq!(replaced["job"]["updated"], 1);
-        assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+        assert!(
+            fs::read(folder.join("video.mkv"))
+                .unwrap()
+                .starts_with(b"SILENT VIDEO")
+        );
 
         let tracks = h.ok(&["library", "list"]);
         assert_eq!(
@@ -1210,4 +1249,103 @@ fn published_video_survives_report_failure_and_audio_repair() {
             }
         );
     }
+}
+
+#[test]
+fn legacy_excerpt_repair_preserves_identity_and_rolls_back_failed_publication() {
+    let h = Harness::new();
+    h.ok(&["server", "start", "--headless"]);
+    h.ok(&["volume", "0"]);
+    let first = h.add_range(true, &["--video", "--wait"]);
+    let id = first["items"][0]["track_id"].as_str().unwrap();
+    h.ok(&[
+        "library",
+        "edit",
+        id,
+        "--title",
+        "Kept title",
+        "--album",
+        "Kept album",
+    ]);
+    let folder = h
+        .home
+        .path()
+        .join("imports/youtube/lO3lG-qXU14--10000-20000");
+    let mut tag = mp4ameta::Tag::read_from_path(folder.join("audio.m4a")).unwrap();
+    tag.chapter_list_mut().push(mp4ameta::Chapter {
+        start: Duration::ZERO,
+        title: "Original source chapter".into(),
+    });
+    tag.write_to_path(folder.join("audio.m4a")).unwrap();
+    let db = rusqlite::Connection::open(h.home.path().join("state.db")).unwrap();
+    db.execute(
+        "UPDATE tracks SET json=json_set(json, '$.track.duration_ms', 797000) WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+    h.ok(&["queue", "add", "--track", id]);
+    let before = h.ok(&["status"]);
+    let audio = fs::read(folder.join("audio.m4a")).unwrap();
+    let manifest = fs::read(folder.join("source.json")).unwrap();
+    fs::write(folder.join("video.mkv"), b"SILENT VIDEO").unwrap();
+    // A readable file is not evidence that its clock is aligned.
+    fs::write(h.home.path().join("bin/fail_video"), "").unwrap();
+    let job = h.add_range(true, &["--video"]);
+    assert_eq!(
+        h.wait(job["job_id"].as_str().unwrap())["job"]["status"],
+        "partial"
+    );
+    assert_eq!(fs::read(folder.join("video.mkv")).unwrap(), b"SILENT VIDEO");
+    fs::remove_file(h.home.path().join("bin/fail_video")).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_video_catalog BEFORE INSERT ON tracks BEGIN SELECT RAISE(FAIL, 'injected catalog failure'); END;").unwrap();
+    let job = h.add_range(true, &["--video"]);
+    assert_eq!(
+        h.wait(job["job_id"].as_str().unwrap())["job"]["status"],
+        "partial"
+    );
+    assert_eq!(
+        fs::read(folder.join("video.mkv")).unwrap(),
+        b"SILENT VIDEO",
+        "catalog failure restores the original file"
+    );
+    assert_eq!(
+        fs::read(folder.join("audio.m4a")).unwrap(),
+        audio,
+        "audio rolls back with video"
+    );
+    assert_eq!(h.ok(&["library", "track", id])["duration_ms"], 797000);
+    db.execute_batch("DROP TRIGGER fail_video_catalog").unwrap();
+    let done = h.add_range(true, &["--video", "--wait"]);
+    assert_eq!(done["job"]["updated"], 1);
+    assert_eq!(done["items"][0]["track_id"], id);
+    assert_eq!(
+        fs::read(folder.join("video.mkv")).unwrap(),
+        b"SILENT VIDEO EXACT"
+    );
+    assert!(
+        mp4ameta::Tag::read_from_path(folder.join("audio.m4a"))
+            .unwrap()
+            .chapters()
+            .is_empty()
+    );
+    assert_eq!(fs::read(folder.join("source.json")).unwrap(), manifest);
+    let duration = h.ok(&["library", "track", id])["duration_ms"].clone();
+    assert!(duration.as_u64().unwrap() < 1000);
+    let mut expected = before;
+    expected["queue"][0]["track"]["duration_ms"] = duration;
+    support::assert_playback_unchanged(expected, h.ok(&["status"]));
+    let calls = fs::read_to_string(h.home.path().join("bin/calls")).unwrap();
+    let again = h.add_range(true, &["--video", "--wait"]);
+    assert_eq!(again["job"]["skipped"], 1);
+    assert_eq!(again["job"]["updated"], 0);
+    assert_eq!(
+        fs::read_to_string(h.home.path().join("bin/calls"))
+            .unwrap()
+            .matches("bestvideo[height<=480]/best[height<=480]")
+            .count(),
+        calls
+            .matches("bestvideo[height<=480]/best[height<=480]")
+            .count(),
+        "repaired clips are not downloaded again"
+    );
 }

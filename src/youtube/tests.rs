@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires installed yt-dlp, ffmpeg and ffprobe; uses synthesized local media only"]
-fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
+fn real_section_downloads_align_audio_and_encoded_video() {
     use std::os::unix::fs::PermissionsExt;
     fn run(cmd: &mut Command) -> Vec<u8> {
         let output = cmd.output().unwrap();
@@ -63,6 +63,22 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
         .arg(&movie)
         .args(["-map", "0:a", "-c:a", "copy"])
         .arg(&music));
+    let webm = temp.path().join("fixture.webm");
+    run(Command::new(&ffmpeg)
+        .args(["-v", "error", "-i"])
+        .arg(&movie)
+        .args([
+            "-an",
+            "-c:v",
+            "libvpx-vp9",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-g",
+            "75",
+        ])
+        .arg(&webm));
     // yt-dlp permits section downloads over HTTP, not file://. Serve only
     // these generated assets on loopback, including FFmpeg's byte ranges.
     use std::io::{Read, Write};
@@ -83,6 +99,7 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
     let assets = [
         std::fs::read(&movie).unwrap(),
         std::fs::read(&music).unwrap(),
+        std::fs::read(&webm).unwrap(),
     ];
     let stopping = Arc::new(AtomicBool::new(false));
     let stop_server = stopping.clone();
@@ -107,9 +124,17 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
                 request.push(byte[0]);
             }
             let request = String::from_utf8_lossy(&request).to_ascii_lowercase();
-            let bytes = if request.starts_with("get /fixture.mp4 ") {
+            let route = request.split_whitespace().nth(1).unwrap_or("");
+            let route = route.split('?').next().unwrap();
+            let bytes = if route.ends_with("/fixture.mp4") {
                 &assets[0]
+            } else if route.ends_with("/fixture.webm") {
+                &assets[2]
             } else {
+                assert!(
+                    route.ends_with("/fixture.m4a"),
+                    "Unexpected fixture request: {request}"
+                );
                 &assets[1]
             };
             let range = request
@@ -147,6 +172,7 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
     };
     crate::platform::atomic_json(&info, &serde_json::json!({
         "id":"VIDEO000001", "title":"Local section fixture", "duration":4,
+        "chapters":[{"start_time":0,"end_time":4,"title":"Whole source"}],
         "extractor":"generic", "extractor_key":"Generic", "webpage_url":file_url(&movie),
         "formats":[
             {"format_id":"audio", "url":file_url(&music), "ext":"m4a", "vcodec":"none", "acodec":"mp4a.40.2", "abr":128},
@@ -238,10 +264,15 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
             assert!((duration - 1.22).abs() < 0.10, "{path:?}: {duration}");
         } else {
             assert!(
-                duration > 0.0 && duration <= 4.0,
-                "Keyframe-aligned excerpt: {duration}"
+                (duration - 1.22).abs() <= 0.041,
+                "Frame-accurate excerpt: {duration}"
             );
-            assert_eq!(value["streams"][0]["codec_name"], "av1");
+            assert_eq!(value["streams"][0]["codec_name"], "h264");
+            assert!(
+                crate::video::probe(path, &config, &stop)
+                    .unwrap()
+                    .exact_clip
+            );
         }
         assert!(start.abs() < 0.05, "{path:?}: starts at {start}");
     }
@@ -297,16 +328,195 @@ fn real_section_downloads_copy_av1_packets_at_keyframe_boundaries() {
             .map(|p| p["data_hash"].as_str().unwrap().to_owned())
             .collect()
     };
-    let original_packets = packets(&movie, "v:0");
-    let copied_packets = packets(&video, "v:0");
-    assert!(!copied_packets.is_empty());
-    assert!(copied_packets.len() < original_packets.len());
+    // Check actual pictures, not only duration: the old copy implementation
+    // started red (source zero) rather than green (source 1.23 seconds).
+    let pixels = |file: &Path, seek: f64| {
+        run(Command::new(&ffmpeg)
+            .args(["-v", "error", "-ss"])
+            .arg(seek.to_string())
+            .arg("-i")
+            .arg(file)
+            .args([
+                "-map",
+                "0:v:0",
+                "-vf",
+                "scale=1:1",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]))
+    };
+    let frames = pixels(&video, 0.0);
     assert!(
-        original_packets
-            .windows(copied_packets.len())
-            .any(|window| window == copied_packets),
-        "Video packets must be an unchanged contiguous slice of the AV1 source"
+        frames[1] > 100 && frames[0] < 20,
+        "Clip starts green, without keyframe preroll"
     );
+    let blue = frames
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .position(|p| p[2] > 200)
+        .unwrap();
+    assert!((blue as f64 / 25.0 - (2.0 - 1.23)).abs() <= 0.04);
+    for seek in [0.0, 0.4, 1.1] {
+        let frame = pixels(&video, seek);
+        let channel = if seek < 0.77 { 1 } else { 2 };
+        assert!(
+            frame[channel] > 100,
+            "Seek {seek} chose the wrong source interval"
+        );
+    }
+    // Source-time chirp measurements at the beginning, middle and end must
+    // agree with the picture clock to within a frame plus one AAC packet.
+    for seek in [0.0, 0.5, 1.0] {
+        let pcm = run(Command::new(&ffmpeg)
+            .args(["-v", "error", "-ss"])
+            .arg(seek.to_string())
+            .arg("-i")
+            .arg(&audio)
+            .args([
+                "-t", "0.2", "-f", "f32le", "-ac", "1", "-ar", "48000", "pipe:1",
+            ]));
+        let samples: Vec<_> = pcm
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|v| f32::from_le_bytes(*v))
+            .collect();
+        let mut crossings = Vec::new();
+        let mut high = false;
+        for (i, sample) in samples.iter().enumerate().skip(2400) {
+            if *sample > 0.25 && !high {
+                crossings.push(i);
+                high = true;
+            } else if *sample < -0.25 {
+                high = false;
+            }
+        }
+        let first = *crossings.first().unwrap() as f64 / 48000.0;
+        let last = *crossings.last().unwrap() as f64 / 48000.0;
+        let frequency = (crossings.len() - 1) as f64 / (last - first);
+        let source_time = (frequency - 300.0) / 200.0 - (first + last) / 2.0;
+        assert!(
+            (source_time - (1.23 + seek)).abs() < 0.062,
+            "Audio/video origin at {seek}: {source_time}"
+        );
+    }
+    assert!(
+        mp4ameta::Tag::read_from_path(&audio)
+            .unwrap()
+            .chapters()
+            .is_empty()
+    );
+    // A legacy chapter track stretches mvhd to the original source duration.
+    let chapters = temp.path().join("chapters.txt");
+    std::fs::write(
+        &chapters,
+        ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=4000\ntitle=Whole source\n",
+    )
+    .unwrap();
+    let legacy = temp.path().join("legacy.m4a");
+    run(Command::new(&ffmpeg)
+        .args(["-v", "error", "-i"])
+        .arg(&audio)
+        .arg("-i")
+        .arg(&chapters)
+        .args(["-map", "0:a", "-c", "copy", "-map_chapters", "1"])
+        .arg(&legacy));
+    let repair_stage = temp.path().join("repair");
+    std::fs::create_dir(&repair_stage).unwrap();
+    let clean = repair_clip_audio(&legacy, &repair_stage, &config, &stop)
+        .unwrap()
+        .unwrap();
+    assert!(
+        mp4ameta::Tag::read_from_path(&legacy)
+            .unwrap()
+            .duration()
+            .as_secs_f64()
+            >= 4.0
+    );
+    let tag = mp4ameta::Tag::read_from_path(&clean).unwrap();
+    assert!(tag.chapters().is_empty());
+    assert!((tag.duration().as_secs_f64() - 1.22).abs() < 0.05);
+    assert_eq!(packets(&clean, "a:0"), packets(&legacy, "a:0"));
+    assert!(
+        repair_clip_audio(&clean, &repair_stage, &config, &stop)
+            .unwrap()
+            .is_none()
+    );
+
+    // Test both source containers, closed/open ends, a zero start, and a
+    // one-frame excerpt through the real downloader, not reconstructed flags.
+    for (codec, file, ext, vcodec) in [
+        ("av1", &movie, "mp4", "av01.0.01M.08"),
+        ("vp9", &webm, "webm", "vp9"),
+    ] {
+        let mut metadata: Value = serde_json::from_slice(&std::fs::read(&info).unwrap()).unwrap();
+        metadata["formats"][1] = serde_json::json!({"format_id":"video", "url":file_url(file), "ext":ext,"vcodec":vcodec,"acodec":"none","width":160,"height":90,"fps":25});
+        crate::platform::atomic_json(&info, &metadata).unwrap();
+        for (index, (start, end)) in [
+            (1230, Some(2450)),
+            (0, Some(1450)),
+            (1230, None),
+            (1230, Some(1270)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut clip = source.clone();
+            clip.range = Some(TimeRange {
+                start_ms: start,
+                end_ms: end,
+            });
+            let stage = temp.path().join(format!("{codec}-{index}"));
+            std::fs::create_dir(&stage).unwrap();
+            let output =
+                download_video(&clip, &stage, &config, &stop, |_| {}).unwrap_or_else(|error| {
+                    let details = run(Command::new(&ffprobe)
+                        .args([
+                            "-v",
+                            "error",
+                            "-show_streams",
+                            "-show_format",
+                            "-of",
+                            "json",
+                        ])
+                        .arg(stage.join("video.mkv")));
+                    panic!(
+                        "{codec} clip {index}: {error:#}: {}",
+                        String::from_utf8_lossy(&details)
+                    );
+                });
+            let probed = crate::video::probe(&output, &config, &stop).unwrap();
+            assert!(probed.exact_clip);
+            assert!(
+                (probed.duration - (end.unwrap_or(4000) - start) as f64 / 1000.0).abs() <= 0.041
+            );
+            let frames = pixels(&output, 0.0);
+            let channel = if start == 0 { 0 } else { 1 };
+            assert!(
+                frames[channel] > 100,
+                "{codec} clip {index} has keyframe preroll"
+            );
+        }
+        let mut full = source.clone();
+        full.range = None;
+        let stage = temp.path().join(format!("{codec}-full"));
+        std::fs::create_dir(&stage).unwrap();
+        let output = download_video(&full, &stage, &config, &stop, |_| {}).unwrap();
+        assert_eq!(
+            packets(&output, "v:0"),
+            packets(file, "v:0"),
+            "Full imports preserve compressed packets"
+        );
+        assert!(
+            !crate::video::probe(&output, &config, &stop)
+                .unwrap()
+                .exact_clip
+        );
+    }
     let source_audio_packets = packets(&music, "a:0");
     let copied_audio_packets = packets(&audio, "a:0");
     assert!(!copied_audio_packets.is_empty());

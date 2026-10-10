@@ -222,10 +222,17 @@ pub struct Publication {
     pub stage: PathBuf,
     pub record: Record,
 }
+/// File facts collected on the worker, never by the playback loop.
+pub struct AudioFile {
+    pub duration_ms: u64,
+    pub modified: u128,
+    pub bytes: u64,
+}
 pub struct VideoPublication {
     pub job: ImportJob,
     pub item: ImportItem,
     pub stage: PathBuf,
+    pub audio: Option<AudioFile>,
 }
 pub enum Message {
     Plan(ImportJob, Vec<ImportItem>),
@@ -631,9 +638,10 @@ fn add_video(
         bail!("Managed video identity mismatch");
     }
     let existing = dir.join(crate::video::FILE);
-    if existing.symlink_metadata().is_ok_and(|m| m.is_file())
-        && crate::video::probe(&existing, config, stop).is_ok()
-    {
+    let ready = existing.symlink_metadata().is_ok_and(|m| m.is_file())
+        && crate::video::probe(&existing, config, stop)
+            .is_ok_and(|info| manifest.source.range.is_none() || info.exact_clip);
+    if ready && manifest.source.range.is_none() {
         item.video_status = Some("ready".into());
         return Ok(());
     }
@@ -654,7 +662,7 @@ fn add_video(
     let root = paths.data.join("imports/.staging");
     crate::platform::private_dir(&root)?;
     let stage = tempfile::Builder::new().prefix("video-").tempdir_in(root)?;
-    if manifest.source.range.is_some() {
+    if !ready && manifest.source.range.is_some() {
         youtube::extract_range(
             &youtube::video_url(&item.video_id),
             manifest.source.range,
@@ -662,27 +670,49 @@ fn add_video(
             stop,
         )?;
     }
-    update(job, "downloading_video", send);
-    let mut last = Instant::now() - Duration::from_secs(1);
-    youtube::download_video(&manifest.source, stage.path(), config, stop, |progress| {
-        let stage = if progress.processed_ms.is_some() {
-            "processing_video"
-        } else {
-            "downloading_video"
-        };
-        let changed = job.stage != stage;
-        job.stage = stage.into();
-        job.progress = progress;
-        if changed || last.elapsed() >= Duration::from_millis(250) {
-            job.revision += 1;
-            send(Message::Progress(job.clone()));
-            last = Instant::now();
-        }
-    })?;
+    if !ready {
+        update(job, "downloading_video", send);
+        let mut last = Instant::now() - Duration::from_secs(1);
+        youtube::download_video(&manifest.source, stage.path(), config, stop, |progress| {
+            let stage = if progress.processed_ms.is_some() {
+                "processing_video"
+            } else {
+                "downloading_video"
+            };
+            let changed = job.stage != stage;
+            job.stage = stage.into();
+            job.progress = progress;
+            if changed || last.elapsed() >= Duration::from_millis(250) {
+                job.revision += 1;
+                send(Message::Progress(job.clone()));
+                last = Instant::now();
+            }
+        })?;
+    }
+    let repaired = if manifest.source.range.is_some() {
+        youtube::repair_clip_audio(&dir.join("audio.m4a"), stage.path(), config, stop)?
+    } else {
+        None
+    };
+    let audio = if manifest.source.range.is_some() {
+        let path = repaired.clone().unwrap_or_else(|| dir.join("audio.m4a"));
+        let tag = mp4ameta::Tag::read_from_path(&path)?;
+        let file = path.metadata()?;
+        Some(AudioFile {
+            duration_ms: tag.duration().as_millis() as u64,
+            modified: file
+                .modified()?
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos(),
+            bytes: file.len(),
+        })
+    } else {
+        None
+    };
     let mut committed = job.clone();
     let mut result = item.clone();
     result.video_status = Some("ready".into());
-    if item.status == "skipped" {
+    if item.status == "skipped" && (!ready || repaired.is_some()) {
         committed.skipped -= 1;
         committed.updated += 1;
         result.status = "updated".into();
@@ -694,6 +724,7 @@ fn add_video(
             job: committed.clone(),
             item: result.clone(),
             stage: stage.path().into(),
+            audio,
         }),
         tx,
     )) {
@@ -705,7 +736,32 @@ fn add_video(
     Ok(())
 }
 
-pub fn publish_video(paths: &Paths, p: &VideoPublication, record: &Record) -> Result<()> {
+/// Roll back staged replacements if publication/catalog registration fails.
+/// Once registered, a report failure must not undo successful media publication.
+#[must_use = "commit the publication only after catalog registration succeeds"]
+pub struct VideoCommit {
+    replacements: Vec<(PathBuf, Option<PathBuf>)>,
+    committed: bool,
+}
+impl VideoCommit {
+    pub fn commit(mut self) {
+        self.committed = true;
+    }
+}
+impl Drop for VideoCommit {
+    fn drop(&mut self) {
+        if !self.committed {
+            for (destination, backup) in self.replacements.iter().rev() {
+                if let Some(backup) = backup {
+                    let _ = std::fs::rename(backup, destination);
+                } else {
+                    let _ = std::fs::remove_file(destination);
+                }
+            }
+        }
+    }
+}
+pub fn publish_video(paths: &Paths, p: &VideoPublication, record: &Record) -> Result<VideoCommit> {
     let dir = crate::deletion::managed_path(paths, &record.track)?;
     let expected = paths
         .data
@@ -716,11 +772,27 @@ pub fn publish_video(paths: &Paths, p: &VideoPublication, record: &Record) -> Re
     {
         bail!("Managed video identity mismatch");
     }
-    std::fs::rename(
-        p.stage.join(crate::video::FILE),
-        dir.join(crate::video::FILE),
-    )?;
-    Ok(())
+    let mut publication = VideoCommit {
+        replacements: Vec::new(),
+        committed: false,
+    };
+    for name in [crate::video::FILE, "audio.m4a"] {
+        let staged = p.stage.join(name);
+        if !staged.is_file() {
+            continue;
+        }
+        let destination = dir.join(name);
+        let backup = if destination.exists() {
+            let backup = p.stage.join(format!("previous-{name}"));
+            std::fs::hard_link(&destination, &backup)?;
+            Some(backup)
+        } else {
+            None
+        };
+        std::fs::rename(staged, &destination)?;
+        publication.replacements.push((destination, backup));
+    }
+    Ok(publication)
 }
 
 #[cfg(test)]

@@ -57,8 +57,8 @@ const QUEUE_LIMIT: usize = 10_000;
 /// asks the server, so a fast typist starts one search instead of one per key.
 /// The queue filter is local and applies at once.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
-/// Saved video can end slightly before its audio (stream-copied excerpts end
-/// near a source keyframe). An end this close to the track's end keeps
+/// Saved video can end slightly before its audio because source stream lengths
+/// differ. An end this close to the track's end keeps
 /// fullscreen so the next video opens there instead of in the normal layout.
 const FULLSCREEN_END_GRACE_MS: u64 = 5_000;
 
@@ -6654,7 +6654,7 @@ mod tests {
             eta: Some(90.0),
             ..Default::default()
         };
-        assert!(job.summary().contains("Copied 1:24 / 3:39 · 38%"));
+        assert!(job.summary().contains("Processed 1:24 / 3:39 · 38%"));
         assert!(!job.summary().contains("MiB/s"));
         app.import_ui.jobs = vec![job];
         for (width, height) in [(40, 12), (80, 24)] {
@@ -6668,9 +6668,9 @@ mod tests {
                 .iter()
                 .map(|c| c.symbol())
                 .collect();
-            assert!(text.contains("Copying video"), "{width}x{height}: {text}");
+            assert!(text.contains("Encoding video"), "{width}x{height}: {text}");
             assert!(
-                text.contains("Copied 1:24 / 3:39 · 38%"),
+                text.contains("Processed 1:24 / 3:39 · 38%"),
                 "{width}x{height}: {text}"
             );
             if width == 80 {

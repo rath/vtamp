@@ -76,7 +76,7 @@ fn positive(value: Option<f64>) -> Option<f64> {
 impl DownloadProgress {
     pub fn processing_summary(&self) -> Option<String> {
         let done = self.processed_ms?;
-        let mut text = format!("Copied {}", crate::model::display_time(done));
+        let mut text = format!("Processed {}", crate::model::display_time(done));
         if let Some(total) = self.processing_total_ms.filter(|n| *n > 0) {
             text.push_str(&format!(
                 " / {} · {:.0}%",
@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(result.bytes, None);
         assert_eq!(
             result.processing_summary().as_deref(),
-            Some("Copied 1:24 / 3:39 · 38% · 1.5x · ETA 90s")
+            Some("Processed 1:24 / 3:39 · 38% · 1.5x · ETA 90s")
         );
         let result = parser
             .line("VTAMP_PROGRESS {\"downloaded_bytes\":1000000,\"speed\":999999,\"eta\":0}")

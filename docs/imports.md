@@ -30,8 +30,9 @@ parameter imports only that video; add `--playlist` to import the whole list.
 A playlist URL imports the list. Lists are limited to 10,000 entries.
 Unavailable videos produce item failures; other videos continue. Live/upcoming broadcasts are
 rejected. Existing source video ID/time-range pairs with present audio files are
-skipped unless `--video` can add a missing or damaged video. That upgrade preserves the audio,
-track ID, metadata overrides, and Queue.
+skipped unless `--video` can add a missing or damaged video or repair an older
+excerpt's timing. Upgrades preserve the track ID, metadata overrides, and Queue;
+legacy excerpt repair may remove stale audio chapters without re-encoding.
 
 Interactive CLI imports ask **Download video too?**, defaulting to no. `--video`
 and `--audio-only` bypass the question and are mutually exclusive. JSON and
@@ -125,16 +126,31 @@ distinct from one with an explicit end. Library, Queue, and import history displ
 the range without changing title metadata. Deleting an excerpt leaves the full
 track and other excerpts intact. Retries and video upgrades retain the range.
 
-Both audio and video use yt-dlp's section download with FFmpeg stream copy.
-Cuts do not force keyframes or re-encode the video: AV1 stays AV1, VP9 stays VP9,
-and compressed video packets are preserved. Start/end boundaries are approximate
-at source packet/keyframe boundaries; exact frame cuts are intentionally not used.
-The usual m4a audio extraction/conversion policy remains unchanged. The same
-requested range is passed to both downloads, but keyframe alignment can change
-the actual saved video boundaries and duration. The player uses the saved audio's
-duration. Existing downloads are not rewritten.
+Audio keeps the usual m4a extraction/conversion policy. Range video downloads
+use accurate seeking and re-encode the requested interval to H.264 (libx264,
+CRF 18, fast preset, yuv420p, no B frames), at up to 480p. Decoder preroll before
+Start is discarded and the saved picture clock begins at zero with the audio.
+Odd dimensions are padded by at most one pixel for H.264. Cuts follow the source
+frame grid; timing accuracy is bounded by a video frame and an audio packet,
+not by the distance to a keyframe. The installed FFmpeg must provide libx264;
+encoding failure is a video failure, never a fallback to an inaccurate copy.
+Full video downloads still preserve their source codec and compressed packets.
 
-During section processing, Imports shows **Copying video clip** with processed
+Re-importing an older excerpt with `--video` repairs its saved video even when
+that file is readable. Corrected clips carry the `VTAMP_CLIP_TIMING=1` video-stream
+tag; a matching, validated clip is not downloaded again. Repair keeps the track
+ID, title/artist/album overrides, and all queue entries. Replacement files are
+prepared and validated in staging; cancellation or encoding failure leaves the
+existing files available. A completed publication survives a later job-report
+failure and can be adopted by retry.
+
+Excerpt audio omits whole-source chapters, which can otherwise report the full
+video's duration. Video repair also removes those chapters from legacy excerpt
+audio by stream copy and updates its catalog and queued duration. This does not
+re-encode the audio. Existing downloads are only repaired by an explicit import;
+startup does not rewrite them.
+
+During section processing, Imports shows **Encoding video clip** with processed
 media time, percentage when the requested duration is known, processing speed,
 and estimated remaining time when available. These updates come from FFmpeg,
 not a timer or download byte count. Normal video transfers also show their download
@@ -249,7 +265,8 @@ contains this information in `source` (`provider: youtube`).
 Audio downloads prefer m4a; FFmpeg extracts/converts to m4a when needed. Opt-in
 video downloads choose the best stream at or below 480 pixels high, without a
 higher-resolution fallback or upscaling. FFmpeg remuxes the picture stream into
-silent `video.mkv` without further re-encoding; FFprobe validates its dimensions and timing.
+silent `video.mkv`; full downloads use stream copy and excerpts use the accurate
+encoding policy above. FFprobe validates its dimensions and timing.
 Audio is registered first. Video failure or cancellation never removes that audio. Thumbnails are stored at up to 512 pixels on the long side, keeping the
 image's own shape like album art: nothing is cropped or padded on disk, and the
 player sizes its cover area to the image so a wide thumbnail is drawn in full.

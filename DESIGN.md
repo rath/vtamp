@@ -250,9 +250,10 @@ Show the full source title and any different saved title with explicit labels
 below. Lead details with the outcome in plain language, such as "Added 1 track
 to Library." Results omit zero counters and completed transfers omit stale
 percentages. Show normal transfer progress for audio and video downloads. While
-FFmpeg copies a time range, label the stage Preparing audio / Copying video and
-show copied media time, known requested duration/percentage, processing speed,
-and ETA when available. Explain that video streams are copied without re-encoding.
+FFmpeg processes a time range, label the stage Preparing audio / Encoding video
+and show processed media time, known requested duration/percentage, processing
+speed, and ETA when available. Explain that excerpt video is encoded for accurate
+timing; full video downloads retain their source codec.
 Boundaries may differ by the source keyframe interval. Never
 present output bytes as network throughput or invent progress when FFmpeg has not
 reported it. Put copying progress first in the details so even the one-row

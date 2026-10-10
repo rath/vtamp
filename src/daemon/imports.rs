@@ -229,10 +229,12 @@ impl Runtime {
                     let record = store
                         .video_record(&crate::youtube::resource_key(&p.item.video_id, p.job.range))?
                         .context("Imported track disappeared")?;
-                    jobs::publish_video(paths, &p, &record)?;
+                    let publication = jobs::publish_video(paths, &p, &record)?;
                     // Flag the indexed row and queued copies now; a file that
                     // is not indexed yet gets its flag from the next scan.
-                    if let Some(track) = store.set_video(&record.track.id)? {
+                    let track = store.set_video(&record.track.id, p.audio.as_ref())?;
+                    publication.commit();
+                    if let Some(track) = track {
                         update_queue_metadata(&track, engine, store, events)?;
                     }
                     store.save_import(&p.job, Some(&p.item))?;
@@ -353,7 +355,7 @@ pub(super) fn update_queue_metadata(
         .iter_mut()
         .chain(engine.state.direct.as_deref_mut())
     {
-        if item.track.id == track.id {
+        if item.track.id == track.id && item.track != *track {
             item.track = track.clone();
             changed = true;
         }

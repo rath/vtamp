@@ -14,12 +14,14 @@ use std::{
 };
 
 pub const FILE: &str = "video.mkv";
+pub const EXACT_CLIP_TAG: &str = "VTAMP_CLIP_TIMING=1";
 
 #[derive(Debug, Clone, Copy)]
 pub struct Info {
     pub width: u32,
     pub height: u32,
     pub duration: f64,
+    pub exact_clip: bool,
 }
 
 pub fn probe(path: &Path, config: &Config, stop: &Cancel) -> Result<Info> {
@@ -31,6 +33,9 @@ pub fn probe(path: &Path, config: &Config, stop: &Cancel) -> Result<Info> {
                 "error",
                 "-show_streams",
                 "-show_format",
+                "-show_packets",
+                "-read_intervals",
+                "%+#1",
                 "-of",
                 "json",
             ])
@@ -70,6 +75,14 @@ pub fn probe(path: &Path, config: &Config, stop: &Cancel) -> Result<Info> {
         width: width as u32,
         height: height as u32,
         duration,
+        exact_clip: stream["tags"]["VTAMP_CLIP_TIMING"] == "1"
+            && stream["codec_name"] == "h264"
+            && stream["start_time"]
+                .as_str()
+                // FFprobe omits start_time for a one-frame Matroska stream.
+                .or_else(|| value["packets"][0]["pts_time"].as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .is_some_and(|start| start.abs() < 0.001),
     })
 }
 

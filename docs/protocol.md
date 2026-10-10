@@ -764,11 +764,14 @@ of queue entry identity. Full downloads retain their old key/path; excerpts use
 scan adoption, upgrades, deletion/recovery, and archive restoration. With
 `video: true`, an existing audio file without a valid silent `video.mkv` is upgraded without replacing audio or changing track/queue identity.
 Section downloads apply the same requested yt-dlp range to audio and video using
-the configured FFmpeg location and explicit `--no-force-keyframes-at-cuts`.
-FFmpeg copies compressed video packets without changing codec; boundaries may
-shift to source packet/keyframe boundaries. Requested ranges still determine
-resource identity, rather than the approximate saved duration. Existing files
-are not transcoded or replaced to change the cutting policy.
+the configured FFmpeg location. Audio uses `--no-force-keyframes-at-cuts` and
+omits source chapters; video uses `--force-keyframes-at-cuts` with explicit H.264
+encoding, discarding pre-start frames and aligning the picture clock to audio
+zero. Full video downloads still copy source packets. Requested ranges determine
+resource identity. A ranged `--video` re-import repairs a readable legacy sidecar
+without the `VTAMP_CLIP_TIMING=1` stream tag and removes stale whole-source audio
+chapters by stream copy, retaining IDs and overrides and refreshing queued duration.
+Startup never initiates these repairs; the wire and database versions are unchanged.
 Video download, remux, and probe run on the import worker after audio publication;
 the owner atomically renames the verified sidecar and saves the item report. A
 failed report commit leaves a recoverable sidecar, recognized on retry. Scans do

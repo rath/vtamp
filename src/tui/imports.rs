@@ -823,7 +823,11 @@ impl App {
         }
         if processing.is_some() {
             lines.push(Line::styled(
-                "Copying source streams without re-encoding.",
+                if job.stage == "processing_video" {
+                    "Encoding an accurately timed video clip."
+                } else {
+                    "Preparing the requested audio interval."
+                },
                 Style::default().fg(p.muted),
             ));
         } else if !job.terminal()
@@ -1196,7 +1200,7 @@ fn import_stage(stage: &str) -> &str {
         "downloading_video" => "Downloading video",
         "resolving_video" => "Looking up video",
         "processing_audio" => "Preparing audio",
-        "processing_video" => "Copying video",
+        "processing_video" => "Encoding video",
         "processing" => "Processing",
         "indexing" => "Saving",
         "cancelling" => "Cancelling",
@@ -1229,7 +1233,7 @@ fn import_outcomes(job: &ImportJob) -> Vec<String> {
             "downloading_video" => "Downloading video (up to 480p)…".into(),
             "resolving_video" => "Checking the source video length…".into(),
             "processing_audio" => "Preparing audio clip…".into(),
-            "processing_video" => "Copying video clip (up to 480p)…".into(),
+            "processing_video" => "Encoding video clip (up to 480p)…".into(),
             "processing" => "Preparing audio and artwork…".into(),
             "indexing" => "Adding to Library…".into(),
             "cancelling" => "Cancelling this import…".into(),

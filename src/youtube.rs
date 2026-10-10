@@ -321,15 +321,21 @@ fn download_tools(stage: &Path, config: &Config) -> Result<PathBuf> {
     Ok(bin)
 }
 
-fn apply_range(cmd: &mut Command, source: &Source) -> Result<()> {
+fn apply_range(cmd: &mut Command, source: &Source, video: bool) -> Result<()> {
     source.validate()?;
     if let Some(range) = TimeRange::normalized(source.range)? {
         cmd.arg("--download-sections")
             .arg(range.section())
-            .arg("--no-force-keyframes-at-cuts")
+            .arg(if video { "--force-keyframes-at-cuts" } else { "--no-force-keyframes-at-cuts" })
             .args([
                 "--downloader-args",
-                "ffmpeg:-progress pipe:1 -nostats -stats_period 1",
+                if video {
+                    // Accurate input seeking discards decoder preroll. B frames would
+                    // introduce negative DTS and make Matroska shift the picture clock.
+                    "ffmpeg_o:-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p -bf 0 -an -sn -dn -vf pad=ceil(iw/2)*2:ceil(ih/2)*2,setpts=PTS-STARTPTS -f matroska -progress pipe:1 -nostats -stats_period 1"
+                } else {
+                    "ffmpeg:-progress pipe:1 -nostats -stats_period 1"
+                },
                 "--no-simulate",
                 "--print",
                 "before_dl:VTAMP_DURATION %(duration)j",
@@ -349,7 +355,11 @@ pub fn download(
     let bin = download_tools(stage, config)?;
     let mut parser = progress::ProgressParser::new(source.range);
     let mut cmd = command(config)?;
-    apply_range(&mut cmd, source)?;
+    apply_range(&mut cmd, source, false)?;
+    if source.range.is_some() {
+        // Whole-source chapters can make a 91-second excerpt report 797 seconds.
+        cmd.arg("--no-embed-chapters");
+    }
     cmd.args([
         "--no-playlist",
         "-f",
@@ -399,11 +409,15 @@ pub fn download_video(
     stop: &Cancel,
     mut progress: impl FnMut(DownloadProgress),
 ) -> Result<PathBuf> {
-    let raw = stage.join("picture.%(ext)s");
+    let raw = stage.join(if source.range.is_some() {
+        "picture.mkv"
+    } else {
+        "picture.%(ext)s"
+    });
     let bin = download_tools(stage, config)?;
     let mut parser = progress::ProgressParser::new(source.range);
     let mut cmd = command(config)?;
-    apply_range(&mut cmd, source)?;
+    apply_range(&mut cmd, source, true)?;
     subprocess::run(
         cmd.arg("--ffmpeg-location")
             .arg(bin)
@@ -442,19 +456,83 @@ pub fn download_video(
         .context("yt-dlp did not produce a video")?;
     let output = stage.join(crate::video::FILE);
     let ffmpeg = subprocess::executable(config.youtube.ffmpeg.as_deref(), "ffmpeg")?;
+    let mut remux = Command::new(ffmpeg);
+    remux
+        .args(["-nostdin", "-v", "error", "-y", "-i"])
+        .arg(input)
+        .args([
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_chapters",
+            "-1",
+            "-c:v",
+            "copy",
+        ]);
+    if source.range.is_some() {
+        // Stream metadata survives archive muxing, whose global tags come from audio.
+        remux.args(["-metadata:s:v:0", crate::video::EXACT_CLIP_TAG]);
+    }
+    subprocess::run(
+        remux.arg(&output),
+        None,
+        stop,
+        Duration::from_secs(600),
+        |_| {},
+    )?;
+    let info = crate::video::probe(&output, config, stop)?;
+    if source.range.is_some() && !info.exact_clip {
+        bail!("Video encoder did not produce a zero-based H.264 clip");
+    }
+    Ok(output)
+}
+
+/// Remove whole-source chapters from a legacy excerpt without changing AAC packets.
+/// Work on staging files only; publication belongs to the server.
+pub fn repair_clip_audio(
+    input: &Path,
+    stage: &Path,
+    config: &Config,
+    stop: &Cancel,
+) -> Result<Option<PathBuf>> {
+    let tag = mp4ameta::Tag::read_from_path(input).context("Cannot read excerpt audio")?;
+    if tag.chapter_list().is_empty() && tag.chapter_track().is_empty() {
+        return Ok(None);
+    }
+    let output = stage.join("audio.m4a");
+    let ffmpeg = subprocess::executable(config.youtube.ffmpeg.as_deref(), "ffmpeg")?;
     subprocess::run(
         Command::new(ffmpeg)
-            .args(["-nostdin", "-v", "error", "-y", "-i"])
+            .args(["-nostdin", "-v", "error", "-n", "-i"])
             .arg(input)
-            .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-c:v", "copy"])
+            .args([
+                "-map",
+                "0:a:0",
+                "-map",
+                "0:v?",
+                "-c",
+                "copy",
+                "-map_metadata",
+                "0",
+                "-map_chapters",
+                "-1",
+            ])
             .arg(&output),
         None,
         stop,
         Duration::from_secs(600),
         |_| {},
     )?;
-    crate::video::probe(&output, config, stop)?;
-    Ok(output)
+    let clean = mp4ameta::Tag::read_from_path(&output)?;
+    if !clean.chapter_list().is_empty()
+        || !clean.chapter_track().is_empty()
+        || clean.duration().is_zero()
+    {
+        bail!("Cannot remove stale excerpt chapters");
+    }
+    Ok(Some(output))
 }
 
 /// Fetch the thumbnail for an already imported video; `cover` converts it.
