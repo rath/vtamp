@@ -380,7 +380,13 @@ music. Import details distinguish audio added, video added, and video failure.
 ### tmux video transport
 
 Local tmux Kitty video uses temporary-file transmission by default, preserving
-original RGBA pixels, resolution, image IDs, and Unicode placeholders. The video
+original RGBA pixels, resolution, and Unicode placeholders. Each frame replaces
+the pixels of one image in a single small command, so the placeholder cells stay
+unchanged and the picture changes at once. Direct transmission alternates two
+images instead, keeping the previous one visible while a multi-read upload
+completes; moving every placeholder to the other image spans several tmux reads,
+and a terminal that draws between them (Ghostty 1.4) shows rows split between
+two frames. The video
 worker owns a private temporary directory and all file I/O. UI rendering only
 marks handoff. The terminal deletes consumed files; the worker removes abandoned
 frames and retired files after a two-second grace period. At the 32-file cap,

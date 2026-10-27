@@ -27,6 +27,8 @@ direct Kitty and Sixel output take an owned copy only for frames being encoded.
 Kitty `t=t` commands carry only the base64-encoded file path and image dimensions;
 the usual virtual placement and Unicode placeholders position the picture. No
 resolution reduction is involved. Ghostty 1.3.1 supports this transfer method.
+File-transfer frames keep one image ID, so placeholders are drawn once per area
+and each frame is a single small command (see the Ghostty 1.4 section below).
 
 The terminal removes consumed files. The worker removes abandoned frames and
 reclaims retired, unconsumed files after a two-second grace period. At the cap
@@ -122,6 +124,39 @@ upload:
 These counts cover the byte stream only, not Ghostty's pixels. An upload that
 spans several tmux reads, such as a cover or direct transmission over SSH, still
 ends its passthrough outside the update.
+
+### Rows split between frames
+
+With the cursor fixed, the maintainer still saw the top of the picture flicker in
+fullscreen video. The maintainer's window had five panes with the status line at
+the top, and the video ran in a 101×30 pane. Two recordings showed the cause:
+
+- An observer client attached read-only with `ignore-size` recorded the real
+  tmux output.
+- A recording of the Ghostty window at about 34 fps captured the pixels.
+
+The two image IDs alternated, so every frame redrew all 101×28 placeholder cells
+for the other image. That was about 28 KB of cells, and tmux delivered them after
+its update had ended, over several reads. In 8 of about 125 recorded frames, part
+of the picture's first row came from the other image. It was a few pixels lower,
+with the theme background above it. The black bar baked into the video made the
+seam visible. In the same frames the status line and the vtamp header did not
+change at all.
+
+File-transfer frames now keep one image ID. A new frame replaces the image's
+pixels and its placement in one passthrough, so tmux's update covers the whole
+change. Direct transmission still alternates, because a multi-read upload would
+otherwise leave no image to show. The table compares the two builds in the same
+mirrored layout with fullscreen video:
+
+| Fullscreen video, 103 uploads | Alternating IDs | One ID |
+| --- | --- | --- |
+| Output per frame | 13.6 KB | 836 B |
+| Placeholders written outside a synchronized update | 299,074 | 2,912 |
+
+All 2,912 remaining placeholders were written once, when fullscreen opened. The
+pixel evidence comes from the maintainer's window before this change. The table
+again covers only the byte stream.
 
 ## Remaining limitation and diagnostics
 

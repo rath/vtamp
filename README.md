@@ -585,7 +585,9 @@ boundaries do not change the Kitty commands or the 256 KiB tmux packet limit.
 Video in local tmux Kitty sessions uses temporary-file transmission by default.
 The video worker writes original RGB pixels from a reusable decoder buffer to a
 private temporary directory, without an extra frame copy or expansion to RGBA;
-only short file-path and placement commands travel through the PTY. The terminal
+only short file-path and placement commands travel through the PTY. Every frame
+replaces the pixels of the same image, so the placeholder cells are not redrawn
+and the picture changes at once instead of row by row. The terminal
 removes consumed files, and the worker cleans skipped or retired frames and
 removes the directory on shutdown. Current frames are protected; at most 32 files
 are retained. This avoids the sustained 1 fps slowdown reproduced with bulk

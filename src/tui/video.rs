@@ -839,6 +839,16 @@ impl Drop for Decoder {
     }
 }
 
+/// A file transfer replaces a picture with one small command, so it keeps one
+/// image ID: the placeholders never change and the terminal swaps the pixels at
+/// once. Moving every placeholder to a second image takes several tmux reads,
+/// and a terminal that draws between them (Ghostty 1.4) shows rows split between
+/// two frames. Direct transfers can themselves span many reads, so they
+/// alternate and keep the previous image visible until the next is complete.
+fn next_slot(slot: usize, file_transfer: bool) -> usize {
+    if file_transfer { slot } else { slot ^ 1 }
+}
+
 fn worker(
     paths: Paths,
     graphics: VideoGraphics,
@@ -998,7 +1008,7 @@ fn worker(
                     r.key.area,
                     file_transfers.as_mut(),
                 )?;
-                slot ^= 1;
+                slot = next_slot(slot, file_transfers.is_some());
                 let info = asset.as_ref().unwrap().1;
                 return Ok(Some(Picture {
                     protocol,
@@ -1196,6 +1206,42 @@ mod tests {
             !root.exists(),
             "unconsumed files must be removed on shutdown"
         );
+    }
+
+    #[test]
+    fn file_transfer_frames_replace_pixels_without_redrawing_placeholders() {
+        let mut files = FileTransfers::new().unwrap();
+        let area = Rect::new(0, 0, 101, 28);
+        let graphics = VideoGraphics {
+            kind: ProtocolType::Kitty,
+            font: ratatui_image::FontSize::new(10, 20),
+            tmux: true,
+            compress: false,
+        };
+        let ids = [42, 43];
+        let draw = |value: u8, slot: usize, files: Option<&mut FileTransfers>| {
+            let pixels = RgbImage::from_pixel(160, 90, image::Rgb([value, 0, 0]));
+            let mut picture =
+                PictureProtocol::encode(&pixels, graphics, Rgba([0; 4]), ids[slot], area, files)
+                    .unwrap();
+            let mut buffer = Buffer::empty(area);
+            assert!(picture.render(area, &mut buffer));
+            let uploads = super::super::take_tmux_graphics(&mut buffer);
+            assert_eq!(uploads.len(), 1);
+            (uploads, buffer)
+        };
+        let first = draw(0, 0, Some(&mut files));
+        let slot = next_slot(0, true);
+        let second = draw(255, slot, Some(&mut files));
+        assert_ne!(first.0, second.0, "each frame still uploads its pixels");
+        assert_eq!(
+            first.1, second.1,
+            "no placeholder cell changes between frames"
+        );
+
+        // Direct transfers keep double buffering, which changes every cell.
+        let slot = next_slot(0, false);
+        assert_ne!(draw(0, 0, None).1, draw(255, slot, None).1);
     }
 
     #[test]
