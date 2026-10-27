@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-10-27
+
+An Android app in `android/` plays the Library, its saved videos, and radio over
+the HTTP API. Terminal video in tmux no longer flashes the cursor or splits rows
+between frames in Ghostty 1.4.
+
+### Added
+
+- An Android app in `android/` for the HTTP API, for Android 10 and later. It
+  browses and searches the Library with kind filters, shows the server's Queue
+  read-only, and starts YouTube imports when the server offers yt-dlp. It plays
+  Library files and radio on the phone with its own queue, background media
+  controls, shuffle, and repeat, and never changes the server's playback or
+  Queue. Saved video plays in step with the audio, keeps HDR output, and
+  continues across fullscreen and rotation. ALAC uses bundled decoders pinned by
+  checksum. The app has its own version, 0.1.0, and is built from source.
+
+### Fixed
+
+- In tmux with Kitty graphics, video no longer flashes the terminal cursor at the
+  top left while its pane has focus. tmux shows its outer cursor after every
+  passthrough and, for the focused pane, synchronizes only commands that move
+  the cursor. Each upload batch now starts by erasing and redrawing the pane's
+  top-left cell, so tmux hides that reset inside its own synchronized update.
+  Ghostty 1.4 draws as soon as output arrives, which made the reset visible on
+  every frame. Covers and direct transmission over SSH can still show it briefly.
+- Local tmux Kitty video keeps one terminal image and replaces its pixels for
+  each frame instead of alternating between two images. The placeholder cells
+  no longer change between frames, so Ghostty 1.4 no longer shows rows split
+  between two frames. In a 101×30 fullscreen pane, each frame now writes about
+  840 bytes instead of about 14 KB.
+
+### Upgrade notes
+
+- Protocol remains **14**, database version **9**, and archive format **2**.
+- The video fixes are in the terminal client. They take effect when a TUI
+  reattaches with the new binary; the server does not need a restart.
+- The Android app is built separately from `android/`; see
+  [android/README.md](android/README.md). Like the iPhone app, it is not a
+  release asset.
+
 ## [0.5.2] — 2026-10-11
 
 YouTube excerpts keep audio and video in sync, and the iPhone Import screen
@@ -444,7 +485,8 @@ easier and fixes live-radio media keys and slow LLM CLI startup.
   playback, relay, media keys, or radio. Intel Macs and other Linux architectures
   build from source.
 
-[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/rath/vtamp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/rath/vtamp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/rath/vtamp/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rath/vtamp/compare/v0.4.3...v0.5.0
