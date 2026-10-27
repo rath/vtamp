@@ -186,12 +186,20 @@ placements before drawing placeholders, text, and the caret. This excludes pane
 sync timeout behavior while preserving the upload ordering that reduced cursor
 flicker. Upload even when placeholder cells are unchanged, and keep their styles
 and cell widths intact. Direct Kitty and Sixel keep their existing rendering path.
-Bound individual tmux Kitty stream writes to 16 KiB without inserting bytes or
-changing protocol packet boundaries. This is a separate limit from the 256 KiB
+Bound individual tmux Kitty stream writes to 16 KiB without inserting bytes into
+or changing protocol packets. This is a separate limit from the 256 KiB
 passthrough packet size.
-Some tmux versions reset the outer cursor after each raw graphics chunk, which
-can briefly expose it at the origin during uploads. Preserve the real input caret
-in the pane, but do not conceal that tmux limitation with an untracked outer hold.
+tmux shows the outer cursor at the origin after every passthrough packet and
+hides it only when it finishes updating the client. For the active pane it opens
+its own synchronized update only for commands that move the outer cursor, so a
+terminal that draws between reads (Ghostty 1.4) flashes the cursor with every
+video frame. Start each tmux Kitty upload batch, in the same write, by erasing the
+origin cell (`CSI 1 J` at the origin) and redrawing it; tmux then wraps the
+uploads in its own tracked update and ends it after hiding the cursor. Leave out
+the erase when the origin cell is skipped, because something else draws it.
+Uploads larger than one tmux read (covers, direct transmission over SSH) can
+still expose the cursor briefly. Preserve the real input caret in the pane, and
+never conceal that limitation with an untracked outer hold.
 Both covers and video use Kitty compression only after a positive capability
 reply, reducing upload stalls when a resized pane temporarily displays the cover.
 

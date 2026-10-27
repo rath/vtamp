@@ -28,7 +28,7 @@ use futures_util::StreamExt;
 use ratatui::{
     Frame, Terminal,
     backend::Backend,
-    buffer::Buffer,
+    buffer::{Buffer, Cell, CellDiffOption},
     layout::{Constraint, Layout, Position, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
@@ -87,17 +87,47 @@ struct Presentation {
 /// Never open a passthrough update in the outer terminal: tmux cannot track it,
 /// and a window swap can suppress the redraw we would need to release it.
 trait PresentationBackend: Backend {
-    fn upload_graphics(&mut self, sequence: &str) -> Result<(), Self::Error>;
+    /// Writes complete tmux passthrough packets, led by `tmux_sync_trigger`
+    /// when the frame's top-left cell can be redrawn.
+    fn upload_graphics(
+        &mut self,
+        origin: Option<&Cell>,
+        uploads: &[String],
+    ) -> Result<(), Self::Error>;
     fn begin_update(&mut self) -> Result<(), Self::Error>;
     fn end_update(&mut self) -> Result<(), Self::Error>;
 }
 
+/// tmux shows the outer cursor at the origin after every passthrough packet and
+/// hides it only when it finishes updating the client. For the active pane it
+/// opens a synchronized update only for commands that move the outer cursor,
+/// which passthrough is not, so a terminal that draws between reads (Ghostty
+/// 1.4) flashes the cursor with every video frame. Erasing the origin cell is
+/// such a command. In the same write as the uploads, tmux then opens its own
+/// update before them and closes it after hiding the cursor again; the cell is
+/// redrawn inside that update.
+fn tmux_sync_trigger(output: &mut Vec<u8>, origin: &Cell) -> std::io::Result<()> {
+    output.extend_from_slice(b"\x1b[H\x1b[1J");
+    ratatui::backend::CrosstermBackend::new(output).draw(std::iter::once((0, 0, origin)))
+}
+
 impl<W: std::io::Write> PresentationBackend for ratatui::backend::CrosstermBackend<W> {
-    fn upload_graphics(&mut self, sequence: &str) -> Result<(), Self::Error> {
+    fn upload_graphics(
+        &mut self,
+        origin: Option<&Cell>,
+        uploads: &[String],
+    ) -> Result<(), Self::Error> {
+        let mut sequence = vec![];
+        if let Some(origin) = origin {
+            tmux_sync_trigger(&mut sequence, origin)?;
+        }
+        for upload in uploads {
+            sequence.extend_from_slice(upload.as_bytes());
+        }
         // Bound individual PTY write requests rather than asking the kernel to
         // drain an entire image in one blocking call. This does not split or
         // rewrite Kitty/tmux commands; the terminal receives identical bytes.
-        for chunk in sequence.as_bytes().chunks(16 * 1024) {
+        for chunk in sequence.chunks(16 * 1024) {
             let _span =
                 diagnostics::span("output.write", || serde_json::json!({"bytes":chunk.len()}));
             std::io::Write::write_all(self, chunk)?;
@@ -114,7 +144,11 @@ impl<W: std::io::Write> PresentationBackend for ratatui::backend::CrosstermBacke
 
 #[cfg(test)]
 impl PresentationBackend for ratatui::backend::TestBackend {
-    fn upload_graphics(&mut self, _sequence: &str) -> Result<(), Self::Error> {
+    fn upload_graphics(
+        &mut self,
+        _origin: Option<&Cell>,
+        _uploads: &[String],
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
     fn begin_update(&mut self) -> Result<(), Self::Error> {
@@ -179,6 +213,14 @@ impl Presentation {
         };
         let next = terminal.current_buffer_mut();
         let uploads = take_tmux_graphics(next);
+        // Something else draws a skipped cell, so it cannot be erased and redrawn.
+        let origin = (!uploads.is_empty())
+            .then(|| {
+                next.cell(Position::ORIGIN)
+                    .filter(|cell| cell.diff_option != CellDiffOption::Skip)
+                    .cloned()
+            })
+            .flatten();
         diagnostics::record("ui.frame", || {
             serde_json::json!({
                 "width":next.area.width,"height":next.area.height,
@@ -202,7 +244,8 @@ impl Presentation {
         self.caret = caret;
         // Finish graphics writes before drawing their placeholders. Do not open
         // MODE_SYNC for this attachment, excluding tmux's one-second pane-sync
-        // timeout path as a source of stalls after a swap.
+        // timeout path as a source of stalls after a swap. tmux's own client
+        // update covers the uploads instead (`tmux_sync_trigger`).
         if !uploads.is_empty() {
             let _span = diagnostics::span("output.upload", || {
                 serde_json::json!({
@@ -210,9 +253,9 @@ impl Presentation {
                 })
             });
             terminal.hide_cursor()?;
-            for upload in &uploads {
-                terminal.backend_mut().upload_graphics(upload)?;
-            }
+            terminal
+                .backend_mut()
+                .upload_graphics(origin.as_ref(), &uploads)?;
         }
         let result = (|| {
             let _span = diagnostics::span(
@@ -7808,11 +7851,49 @@ mod tests {
         );
         let mut output = Output::default();
         CrosstermBackend::new(&mut output)
-            .upload_graphics(&sequence)
+            .upload_graphics(None, std::slice::from_ref(&sequence))
             .unwrap();
         assert_eq!(output.bytes, sequence.as_bytes());
         assert!(output.sizes.len() > 1);
         assert!(output.sizes.iter().all(|size| *size <= 16 * 1024));
+    }
+
+    #[test]
+    fn tmux_uploads_follow_an_origin_redraw_in_the_same_write() {
+        use ratatui::{backend::CrosstermBackend, style::Color};
+        use std::io::{self, Write};
+        #[derive(Default)]
+        struct Output(Vec<Vec<u8>>);
+        impl Write for Output {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.push(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let uploads = [
+            "\x1bPtmux;\x1b\x1b_Ga=T,t=t;cGF0aA==\x1b\x1b\\\x1b\\".to_owned(),
+            "\x1bPtmux;\x1b\x1b_Ga=p,U=1\x1b\x1b\\\x1b\\".to_owned(),
+        ];
+        let mut origin = Cell::new("한");
+        origin
+            .set_fg(Color::Rgb(1, 2, 3))
+            .set_bg(Color::Rgb(4, 5, 6));
+        let mut output = Output::default();
+        CrosstermBackend::new(&mut output)
+            .upload_graphics(Some(&origin), &uploads)
+            .unwrap();
+        // tmux must parse the erase and the packets together, or its client
+        // update can end before the passthrough resets the cursor.
+        assert_eq!(output.0.len(), 1);
+        let written = String::from_utf8(output.0.remove(0)).unwrap();
+        let (redraw, packets) = written.split_once("\x1bPtmux;").unwrap();
+        assert!(redraw.starts_with("\x1b[H\x1b[1J\x1b[1;1H"));
+        assert!(redraw.contains("38;2;1;2;3") && redraw.contains("48;2;4;5;6"));
+        assert!(redraw.contains("한"));
+        assert_eq!(format!("\x1bPtmux;{packets}"), uploads.concat());
     }
 
     #[test]
@@ -7865,7 +7946,8 @@ mod tests {
         assert_eq!(frames.len(), 4);
         for frame in &frames[..2] {
             let (upload, text) = frame.rsplit_once("\x1b[?25l").unwrap();
-            assert!(upload.starts_with("\x1b[?25l\x1bPtmux;"));
+            let (redraw, upload) = upload.split_once("\x1bPtmux;").unwrap();
+            assert!(redraw.starts_with("\x1b[?25l\x1b[H\x1b[1J\x1b[1;1H"));
             assert_eq!(upload.matches("a=T").count(), 1);
             assert!(!upload.contains('\u{10eeee}'));
             assert!(!text.contains("\x1bPtmux;"));
@@ -7874,6 +7956,38 @@ mod tests {
         assert!(!frames[1].contains('\u{10eeee}'));
         assert!(frames[2].starts_with("\x1b[?25l"));
         assert!(frames[2].contains("overlay"));
+        assert_eq!(output.matches("\x1b[1J").count(), 2, "only upload frames");
+    }
+
+    #[test]
+    fn tmux_uploads_never_erase_an_origin_they_cannot_redraw() {
+        use ratatui::{TerminalOptions, Viewport, backend::CrosstermBackend};
+        use ratatui_image::protocol::{Protocol, kitty::Kitty};
+
+        let image = image::DynamicImage::new_rgb8(80, 40);
+        let protocol = Protocol::Kitty(
+            Kitty::new(image, Rect::new(0, 0, 3, 2).as_size(), 42, true, false).unwrap(),
+        );
+        let mut output = Vec::new();
+        {
+            let mut terminal = Terminal::with_options(
+                CrosstermBackend::new(&mut output),
+                TerminalOptions {
+                    viewport: Viewport::Fixed(Rect::new(0, 0, 40, 12)),
+                },
+            )
+            .unwrap();
+            let mut presentation = Presentation::default();
+            let drawn = presentation.draw(&mut terminal, |frame| {
+                frame.render_widget(ratatui_image::Image::new(&protocol), Rect::new(4, 2, 3, 2));
+                frame.buffer_mut()[(0, 0)].set_diff_option(CellDiffOption::Skip);
+                None
+            });
+            assert!(drawn.unwrap());
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("\x1b[?25l\x1bPtmux;"));
+        assert!(!output.contains("\x1b[1J"));
     }
 
     #[test]

@@ -565,9 +565,15 @@ paths pair each synchronized begin with an explicit end. vtamp does not hold the
 outer terminal through passthrough and wait for a
 later tmux redraw to release it; that could leave video and spectrum frozen after
 `swap-pane` while audio continued. Covers and video use compression when the
-terminal confirms support. Some tmux versions briefly show the cursor at the top
-left during Kitty uploads; the input field still uses the real pane cursor for
-IME composition. This tmux cursor limitation is not hidden with an outer hold.
+terminal confirms support. tmux shows the cursor at the top left after every
+passthrough until it finishes the update, and only synchronizes the focused pane
+for commands that move the cursor. Each batch of Kitty uploads therefore starts by
+erasing and redrawing the pane's top-left cell, so tmux hides that reset in its
+own synchronized update; without it, Ghostty 1.4 flashes the cursor while video
+plays in the focused pane. Uploads too large for one tmux read, such as covers or
+direct transmission over SSH, can still show it briefly. The input field still
+uses the real pane cursor for IME composition, and vtamp never holds the outer
+terminal through passthrough.
 Video uploads group complete Kitty commands into bounded tmux passthrough
 packets (up to 256 KiB). Kitty's 4 KiB chunks are preserved, but tmux no longer
 resets the outer cursor for every chunk. This reduces CPU spikes and frame-rate
