@@ -73,6 +73,56 @@ and contains 1497 small uploads, no file-limit errors, and no video error packet
 delivered to the UI. These are bounded observations in one local environment,
 not a guarantee for other terminals or remote sessions.
 
+## Cursor flashes with Ghostty 1.4
+
+After the maintainer upgraded Ghostty from 1.3.1 to 1.4.0, the cursor flashed
+rapidly while video played in the focused tmux pane. With focus in another pane
+it did not.
+
+- tmux (3.3 and later) calls `tty_invalidate` after writing each passthrough
+  packet (`tty_cmd_rawstring`). That sends `cnorm` (`CSI ? 12 l CSI ? 25 h`) and
+  moves the outer cursor to the origin. `server_client_reset_state` hides it
+  again when the client update ends.
+- `screen_write_initctx` starts tmux's synchronized update on the first command
+  of another pane's output. For the active pane it does so only when that first
+  command moves the outer cursor. Passthrough does not, so the reset reached
+  Ghostty unsynchronized.
+- Ghostty 1.4.0 parks its display link when idle and draws immediately after a
+  PTY wakeup until the link runs again (#14035, #14068, #14691). A fairer terminal
+  lock also lets the renderer take a snapshot after each read batch. 1.3.1 drew a
+  focused terminal only on display-link ticks, so it rarely caught the brief
+  state. Mode 2026 still suppresses drawing in 1.4.0.
+
+The TUI now starts each upload batch with `CSI H`, `CSI 1 J`, and a redraw of the
+origin cell, in the same write as the packets. tmux treats erasing to the start
+of the screen as a cursor-moving command, so it opens its own update before the
+packets and ends it after hiding the cursor.
+
+The measurement used tmux next-3.9 and a 160×48 client whose output a PTY logger
+recorded (`TERM=xterm-ghostty`, `sync` feature). An isolated, muted server played
+a saved video. The same scenario ran with the release builds before and after
+the change. `cursor_trace` from `scripts/check-video.py` counted cursor moves
+made while the cursor was visible outside a synchronized update:
+
+| Video playing | Before | After |
+| --- | --- | --- |
+| Uploads with the TUI pane active | 114 | 112 |
+| Cursor shown outside a synchronized update | 119 | 5 |
+| Exposed cursor moves, TUI pane active | 270 | 2 |
+| Exposed cursor moves, another pane active | 0 | 0 |
+
+The remaining cases after the change come from three events, none of them an
+upload:
+
+- attaching;
+- the startup Kitty query;
+- one full redraw after tmux discarded output for the slow logging client
+  (`TTY_BLOCK`).
+
+These counts cover the byte stream only, not Ghostty's pixels. An upload that
+spans several tmux reads, such as a cover or direct transmission over SSH, still
+ends its passthrough outside the update.
+
 ## Remaining limitation and diagnostics
 
 Covers still use direct pixel uploads and can briefly stall when deliberately
