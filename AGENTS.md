@@ -27,7 +27,11 @@ This file holds only cross-cutting rules for agents. Behavior specifications liv
 
 | Topic | Document |
 | --- | --- |
-| Workflows, keys, audio, media keys, storage, troubleshooting, optional live checks | `README.md` |
+| Install, first listen, keys, command table, feature overview | `README.md` |
+| Loudness normalization, live radio, macOS media keys, terminal graphics, tmux status bar, Library archives, storage and troubleshooting | `docs/normalization.md`, `docs/radio.md`, `docs/media-keys.md`, `docs/terminal-graphics.md`, `docs/tmux-status.md`, `docs/archives.md`, `docs/troubleshooting.md` |
+| Headless servers, casts, HTTP API, relays | `docs/remote.md` |
+| CLI examples and JSON shapes for scripts and agents | `docs/agents.md` |
+| Development checks, optional live checks, website deployment, screenshots | `docs/development.md` |
 | Wire protocol, CLI/agent contracts, queue edits, receipts, scans, reservations, radio, migrations | `docs/protocol.md` |
 | TUI layout and interaction, spectrum, imports and radio UI, website | `DESIGN.md`, `PRODUCT.md`, `docs/themes.md` |
 | Optional yt-dlp imports and LLM metadata | `docs/imports.md`, `docs/llm.md` |
@@ -83,7 +87,7 @@ without tmux; report skips as skips, not as live validation.
   `mdat` atom; preserve that regression. If a sandbox blocks AudioToolbox or
   CoreAudio, rerun outside it instead of reporting a decoder or player failure.
 - Tests needing personal media, an audio device, or a desktop session are ignored
-  by default (README > Development). The default suite proves neither audible
+  by default (`docs/development.md`). The default suite proves neither audible
   playback nor terminal graphics.
 - `tests/metadata_llm.rs` (`VTAMP_TEST_LLM_HOME` pointing at a directory with
   `llm.json`, run with `--ignored`) makes ten real model requests and consumes

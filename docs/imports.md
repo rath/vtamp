@@ -93,7 +93,7 @@ restarting the server loses it, and re-running the command is safe.
 ## Archive downloaded resources
 
 To move or back up downloaded resources, use `library export FILE` and
-`library import FILE`, described in [Portable Library archives](../README.md#portable-library-archives).
+`library import FILE`, described in [Portable Library archives](archives.md).
 Archive commands remain available without yt-dlp or an LLM. They always include
 local audio and YouTube downloads, with current tags and covers embedded in audio
 copies. Saved video is exported as an MKV with sound, using installed FFmpeg and

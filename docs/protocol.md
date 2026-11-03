@@ -131,7 +131,7 @@ Protocol 2 keeps the existing command names and adds:
 
 | Command | Request fields | Successful data |
 | --- | --- | --- |
-| `now` | none | Compact playback snapshot; see README |
+| `now` | none | Compact playback snapshot; see `agents.md` |
 | `queue_page` | `offset`, `limit` | `items`, `total`, `offset`, `queue_revision` |
 | `library_search` | `filter`, `offset`, `limit` | Existing `tracks`, `total`, `offset` page |
 | `library_track` | `id` | One `Track` |
@@ -161,8 +161,8 @@ otherwise clears it. The response includes the effective `query`, nullable
 The anchor is an additive version-5 extension; older servers ignore the field,
 so clients must verify the response query and target identity.
 
-Queue edit documents and CLI examples are described in README > For scripts and
-agents. The command's nullable guard and request ID fields may be omitted;
+Queue edit documents and CLI examples are described in
+[`agents.md`](agents.md). The command's nullable guard and request ID fields may be omitted;
 `dry_run` is required. Operations address library IDs for additions and entry IDs
 for removals/moves. Apply to a candidate, validate every step, commit session and
 optional receipt together, then publish in memory and emit a state event. Invalid

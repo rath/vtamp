@@ -107,7 +107,7 @@ def capture(output):
         raise RuntimeError("Capture requires macOS with Ghostty and tmux.")
     for executable in ("cargo", "swiftc", "tmux", "screencapture"):
         if not shutil.which(executable):
-            raise RuntimeError(f"Missing {executable}; see README > Refresh the screenshots.")
+            raise RuntimeError(f"Missing {executable}; see docs/development.md > Refresh the screenshots.")
     if not GHOSTTY.is_dir():
         raise RuntimeError("Install Ghostty at /Applications/Ghostty.app before capturing.")
 
@@ -274,7 +274,7 @@ def main():
     except (RuntimeError, OSError, sqlite3.Error, subprocess.SubprocessError) as error:
         detail = getattr(error, "stderr", None) or str(error)
         print(f"Capture failed: {detail}", file=sys.stderr)
-        print("Existing screenshots were preserved. See README for capture setup.", file=sys.stderr)
+        print("Existing screenshots were preserved. See docs/development.md for capture setup.", file=sys.stderr)
         return 1
     return 0
 

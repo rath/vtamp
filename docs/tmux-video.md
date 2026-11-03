@@ -174,4 +174,4 @@ Use a debug client for symbolized stack sampling. Compare `output.upload` and
 `video.file_queue`, `video.file_limit`, and `video.error` distinguish file-lifetime
 failures from cancelled or failed decoder work. An internal error associated
 with a cancelled request need not be delivered to the UI. See the
-[README tracing instructions](../README.md#trace-a-tui-stall).
+[tracing instructions](development.md#trace-a-tui-stall).
