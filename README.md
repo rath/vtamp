@@ -770,9 +770,9 @@ files sit at the top level with readable artist/title names:
 
 ```text
 manifest.json
-김동률 - 감사.m4a
-김동률 - 감사.mkv
-김동률 - 출발.m4a
+Example Artist - Example Track.m4a
+Example Artist - Example Track.mkv
+Example Artist - Another Track.m4a
 ```
 
 Export embeds the current title, artist, album, and cover into audio copies.
@@ -864,7 +864,7 @@ examples are placeholders to replace with IDs returned by vtamp.
 
 ```sh
 vtamp now --json
-vtamp library search --artist "DAY6" --title "HAPPY" --exact --json
+vtamp library search --artist "Example Artist" --title "Example Track" --exact --json
 vtamp library search 'love' --exclude 'live' --limit 20 --json
 vtamp library search --kind video --json
 vtamp library track TRACK_ID --json
