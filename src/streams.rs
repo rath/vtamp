@@ -1,10 +1,28 @@
 //! Persistent radio registrations and bounded, offline playlist parsing.
+pub(crate) mod resolve;
+
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
 pub const MAX_ENTRIES: usize = 1000;
 const MAX_BYTES: u64 = 1024 * 1024;
+
+/// Validate a stream URL and return its normalized form.
+pub(crate) fn validated_url(input: &str) -> Result<String> {
+    let mut url = url::Url::parse(input.trim()).context("Expected an HTTP(S) stream URL")?;
+    ensure!(
+        matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
+        "Expected an HTTP(S) stream URL"
+    );
+    ensure!(
+        url.username().is_empty() && url.password().is_none(),
+        "Authenticated stream URLs are not supported"
+    );
+    ensure!(url.as_str().len() <= 8192, "Stream URL is too long");
+    url.set_fragment(None);
+    Ok(url.into())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Entry {
@@ -14,24 +32,14 @@ pub struct Entry {
 
 impl Entry {
     pub fn validated(&self) -> Result<Self> {
-        let mut url = url::Url::parse(self.url.trim()).context("Expected an HTTP(S) stream URL")?;
-        ensure!(
-            matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
-            "Expected an HTTP(S) stream URL"
-        );
-        ensure!(
-            url.username().is_empty() && url.password().is_none(),
-            "Authenticated stream URLs are not supported"
-        );
-        ensure!(url.as_str().len() <= 8192, "Stream URL is too long");
-        url.set_fragment(None);
+        let url = validated_url(&self.url)?;
         let name = self.name.trim();
         ensure!(
             !name.is_empty() && name.len() <= 512 && !name.chars().any(char::is_control),
             "Channel name must contain 1–512 bytes without control characters"
         );
         Ok(Self {
-            url: url.into(),
+            url,
             name: name.into(),
         })
     }

@@ -187,8 +187,11 @@ vtamp library stream remove STREAM_ID
 
 For [radio.bsod.kr](https://radio.bsod.kr/), copy the channel's **fixed URL**
 (고정 URL), or export the selected region as M3U or PLS. A final broadcast URL
-may contain an expiring token; vtamp reconnects using the URL you registered.
-No yt-dlp, FFmpeg, account, or download step is needed for radio playback.
+may contain an expiring token. vtamp resolves a fixed `radio.bsod.kr` channel to
+the broadcaster's direct stream before each connect, so the site's browser
+challenge and expiring redirect tokens never reach AVPlayer. Other HTTP(S) URLs
+are played and retried exactly as registered. No yt-dlp, FFmpeg, account, or
+download step is needed for radio playback.
 
 In the TUI, press **a** and enter a stream URL, then its channel name. The same
 prompt accepts a local M3U/PLS file; review its channels and press Enter to add

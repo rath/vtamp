@@ -65,6 +65,8 @@ walkdir = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 # Device playback (cpal) is built on macOS only; AAC decodes through AudioToolbox.
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-isomp4", "symphonia-alac", "mp3", "flac", "wav", "vorbis", "tracing"] }
+# Some radio providers only offer a TLS 1.2 CBC suite that rustls omits.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
 security-framework = "3"
 objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = ["std", "ExtendedAudioFile", "objc2-core-audio-types", "objc2-core-foundation"] }
 objc2-core-audio-types = { version = "0.3.2", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
