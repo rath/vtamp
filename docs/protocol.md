@@ -247,7 +247,12 @@ the ordinary state revision, never queue revision. Unchanged radio sessions do
 not write periodic position checkpoints.
 
 Pause/stop release native playback and cancel retries. Resume and reconnect use
-the registered URL, resolving redirects again. Native stalls get a 20-second
+the registered URL, following ordinary HTTP redirects again. The native player
+receives the URL directly; vtamp does not interpret web player pages or broadcaster
+API responses, solve browser challenges, or refresh expiring tokens. Only the
+user-supplied URL is persisted, never a redirect target discovered during playback.
+An expired registration must be removed and added with a fresh stream URL; queued
+copies retain their old URLs and must also be replaced. Native stalls get a 20-second
 watchdog and capped exponential reconnect backoff. Unsupported/missing resources
 pause with `last_error`. Network endings never trigger natural queue advancement.
 Seek is unsupported, as is `stop_after_current`; deadline sleep timers still work.

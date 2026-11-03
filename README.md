@@ -173,10 +173,11 @@ A cast remains independent of the server's volume setting, including mute.
 
 ## Live radio
 
-Register a channel using its stable HTTP(S) URL and a name:
+Register a channel using its direct HTTP(S) stream URL and a name. Replace the
+example URL below with a broadcaster's HLS, MP3, or AAC stream address:
 
 ```sh
-vtamp library stream add 'https://radio.bsod.kr/stream?stn=kbs&ch=1fm' --name 'KBS 1FM'
+vtamp library stream add 'https://example.com/live.m3u8' --name 'My radio'
 vtamp play --track STREAM_ID
 vtamp library stream import ~/Downloads/seoul.m3u --preview
 vtamp library stream import ~/Downloads/seoul.m3u
@@ -185,13 +186,15 @@ vtamp library stream remove STREAM_ID
 
 `STREAM_ID` is the registration response’s `first_registered_id`.
 
-For [radio.bsod.kr](https://radio.bsod.kr/), copy the channel's **fixed URL**
-(고정 URL), or export the selected region as M3U or PLS. A final broadcast URL
-may contain an expiring token. vtamp resolves a fixed `radio.bsod.kr` channel to
-the broadcaster's direct stream before each connect, so the site's browser
-challenge and expiring redirect tokens never reach AVPlayer. Other HTTP(S) URLs
-are played and retried exactly as registered. No yt-dlp, FFmpeg, account, or
-download step is needed for radio playback.
+Use a stream address supplied by the broadcaster, or import a local M3U/PLS list
+of stream addresses. A web player page or an API returning JSON or URL text is
+not a stream address. vtamp passes the registered URL to the native player on
+each connection, which follows ordinary HTTP redirects. It has no site-specific
+URL resolver, browser challenge handling, or automatic token refresh. Prefer a
+stable stream URL; if a registered URL's token expires, obtain a fresh address
+and remove/re-register the channel. Removing a registration leaves queued copies
+intact, so remove those and enqueue the new registration as well. No yt-dlp,
+FFmpeg, account, or download step is needed for radio playback.
 
 In the TUI, press **a** and enter a stream URL, then its channel name. The same
 prompt accepts a local M3U/PLS file; review its channels and press Enter to add

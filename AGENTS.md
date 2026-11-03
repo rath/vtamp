@@ -195,7 +195,8 @@ The documents above hold the full contracts; these are the most common regressio
   group. The LLM defaults to `none`; credentials live in Keychain or an environment
   variable name, never plaintext config; connection tests send only a generic
   request, never library data.
-- Radio persists registered URLs only, never resolved or tokenized endpoints.
+- Radio persists user-registered URLs only; playback never replaces them with
+  resolved redirect targets or refreshed tokens.
 - The HTTP API exists only with `--api`. It serves catalog files by track ID
   only, refuses commands that name server paths, and never terminates TLS or
   authenticates; the private network in front of it does.

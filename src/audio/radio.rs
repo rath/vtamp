@@ -84,9 +84,7 @@ struct Configuration {
 }
 struct Shared {
     id: u64,
-    fixed_url: String,
-    target: Mutex<Target>,
-    resolving: AtomicBool,
+    url: String,
     /// Analysis of what the native player decodes, when the system can tap it.
     spectrum: Option<Arc<Spectrum>>,
     tap: Arc<tap::Report>,
@@ -94,61 +92,6 @@ struct Shared {
     scheduled: AtomicBool,
     closed: AtomicBool,
 }
-#[derive(Clone, Debug)]
-enum Target {
-    Pending,
-    Ready(String),
-    Failed { message: String, fatal: bool },
-}
-impl Shared {
-    /// Refresh the direct URL from the registered fixed URL.
-    ///
-    /// A fixed radio.bsod.kr URL changes when its provider rotates tokens, so
-    /// every reconnect returns here. Plain URLs are ready immediately.
-    fn start_resolve(self: &Arc<Self>) {
-        if !crate::streams::resolve::needs_resolution(&self.fixed_url) {
-            *self.target.lock().unwrap() = Target::Ready(self.fixed_url.clone());
-            return;
-        }
-        if self.resolving.swap(true, Ordering::AcqRel) {
-            *self.target.lock().unwrap() = Target::Pending;
-            return;
-        }
-        *self.target.lock().unwrap() = Target::Pending;
-        let shared = self.clone();
-        let spawned = std::thread::Builder::new()
-            .name("vtamp-stream-url".into())
-            .spawn(move || {
-                let result = crate::streams::resolve::resolve_stream(&shared.fixed_url);
-                if !shared.closed.load(Ordering::Acquire) {
-                    let target = match result {
-                        Ok(crate::streams::resolve::Resolved::Direct(url)) => Target::Ready(url),
-                        Ok(crate::streams::resolve::Resolved::Unsupported(message)) => {
-                            Target::Failed {
-                                message,
-                                fatal: true,
-                            }
-                        }
-                        Err(error) => Target::Failed {
-                            message: format!("Cannot resolve stream URL: {error:#}"),
-                            fatal: false,
-                        },
-                    };
-                    *shared.target.lock().unwrap() = target;
-                }
-                shared.resolving.store(false, Ordering::Release);
-                schedule(shared);
-            });
-        if let Err(error) = spawned {
-            *self.target.lock().unwrap() = Target::Failed {
-                message: format!("Cannot start stream URL resolver: {error}"),
-                fatal: false,
-            };
-            self.resolving.store(false, Ordering::Release);
-        }
-    }
-}
-
 pub(super) struct Player {
     shared: Arc<Shared>,
 }
@@ -166,9 +109,7 @@ impl Player {
         let player = Self {
             shared: Arc::new(Shared {
                 id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-                fixed_url: url,
-                target: Mutex::new(Target::Pending),
-                resolving: AtomicBool::new(false),
+                url,
                 spectrum: spectrum.filter(|_| tap::supported()),
                 tap: Arc::default(),
                 configuration: Mutex::new(Configuration {
@@ -185,12 +126,49 @@ impl Player {
                 closed: AtomicBool::new(false),
             }),
         };
-        player.shared.start_resolve();
         player.schedule();
         Ok(player)
     }
     fn schedule(&self) {
-        schedule(self.shared.clone());
+        if self.shared.scheduled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let shared = self.shared.clone();
+        DispatchQueue::main().exec_async(move || {
+            autoreleasepool(|_| {
+                // Clear before reading configuration so a concurrent edit always
+                // gets either this pass or a later pass, never a lost cancellation.
+                shared.scheduled.store(false, Ordering::Release);
+                PLAYERS.with(|players| {
+                    let mut players = players.borrow_mut();
+                    let (generation, paused, volume) = {
+                        let config = shared.configuration.lock().unwrap();
+                        (config.generation, config.paused, config.volume)
+                    };
+                    if shared.closed.load(Ordering::Acquire) || paused {
+                        players.remove(&shared.id);
+                        return;
+                    }
+                    if players
+                        .get(&shared.id)
+                        .is_some_and(|p| p.generation != generation)
+                    {
+                        players.remove(&shared.id);
+                    }
+                    let native = players
+                        .entry(shared.id)
+                        .or_insert_with(|| Native::new(generation));
+                    let update = native.poll(&shared, volume);
+                    let mut config = shared.configuration.lock().unwrap();
+                    if config.generation == generation && !shared.closed.load(Ordering::Acquire) {
+                        config.update = update;
+                    } else {
+                        drop(config);
+                        players.remove(&shared.id);
+                    }
+                });
+            })
+        });
     }
     pub(super) fn poll(&self) -> StreamUpdate {
         self.schedule();
@@ -215,7 +193,6 @@ impl Player {
                 fatal: false,
             };
         }
-        self.shared.start_resolve();
         self.schedule();
     }
     pub(super) fn volume(&mut self, volume: u8) {
@@ -242,47 +219,6 @@ impl Drop for Player {
         self.shared.closed.store(true, Ordering::Release);
         self.schedule();
     }
-}
-
-fn schedule(shared: Arc<Shared>) {
-    if shared.scheduled.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    DispatchQueue::main().exec_async(move || {
-        autoreleasepool(|_| {
-            // Clear before reading configuration so a concurrent edit always
-            // gets either this pass or a later pass, never a lost cancellation.
-            shared.scheduled.store(false, Ordering::Release);
-            PLAYERS.with(|players| {
-                let mut players = players.borrow_mut();
-                let (generation, paused, volume) = {
-                    let config = shared.configuration.lock().unwrap();
-                    (config.generation, config.paused, config.volume)
-                };
-                if shared.closed.load(Ordering::Acquire) || paused {
-                    players.remove(&shared.id);
-                    return;
-                }
-                if players
-                    .get(&shared.id)
-                    .is_some_and(|p| p.generation != generation)
-                {
-                    players.remove(&shared.id);
-                }
-                let native = players
-                    .entry(shared.id)
-                    .or_insert_with(|| Native::new(generation));
-                let update = native.poll(&shared, volume);
-                let mut config = shared.configuration.lock().unwrap();
-                if config.generation == generation && !shared.closed.load(Ordering::Acquire) {
-                    config.update = update;
-                } else {
-                    drop(config);
-                    players.remove(&shared.id);
-                }
-            });
-        })
-    });
 }
 
 struct Native {
@@ -346,47 +282,17 @@ impl Native {
         self.retry_at = Some(now + retry_delay(self.attempts));
         self.attempts = self.attempts.saturating_add(1);
     }
-    fn poll(&mut self, shared: &Arc<Shared>, volume: u8) -> StreamUpdate {
+    fn poll(&mut self, shared: &Shared, volume: u8) -> StreamUpdate {
         let now = Instant::now();
-        if self.update.fatal {
+        if self.update.fatal || self.retry_at.is_some_and(|at| at > now) {
             return self.update.clone();
-        }
-        if let Some(at) = self.retry_at {
-            if at > now {
-                return self.update.clone();
-            }
-            self.retry_at = None;
-            shared.start_resolve();
         }
         // SAFETY: AVPlayer APIs and retained values stay on the main thread;
         // URLs are validated at the protocol boundary. No raw native pointers
         // or Objective-C objects cross the control channel.
         unsafe {
             if self.player.is_none() {
-                let url = match shared.target.lock().unwrap().clone() {
-                    Target::Ready(url) => url,
-                    Target::Pending => {
-                        self.update = StreamUpdate {
-                            status: StreamStatus::Connecting,
-                            error: None,
-                            fatal: false,
-                        };
-                        return self.update.clone();
-                    }
-                    Target::Failed { message, fatal } => {
-                        self.update = StreamUpdate {
-                            status: StreamStatus::Reconnecting,
-                            error: Some(message),
-                            fatal,
-                        };
-                        if !fatal {
-                            self.retry_at = Some(now + retry_delay(self.attempts));
-                            self.attempts = self.attempts.saturating_add(1);
-                        }
-                        return self.update.clone();
-                    }
-                };
-                let Some(url) = NSURL::URLWithString(&NSString::from_str(&url)) else {
+                let Some(url) = NSURL::URLWithString(&NSString::from_str(&shared.url)) else {
                     self.retry(now, Some(-1000));
                     return self.update.clone();
                 };
@@ -404,11 +310,6 @@ impl Native {
                 self.progressed_at = now;
                 self.progress = 0.0;
                 self.retry_at = None;
-                self.update = StreamUpdate {
-                    status: StreamStatus::Connecting,
-                    error: None,
-                    fatal: false,
-                };
             }
             if !self.tap_logged && shared.tap.prepared() {
                 self.tap_logged = true;
