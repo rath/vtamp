@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-Video files on the server's machine can be imported with their picture.
+## [0.5.4] — 2026-11-15
+
+Video files on the server's machine can be imported into the Library with their
+picture, and a background server no longer holds pipes open for the command that
+started it.
 
 ### Added
 
@@ -14,7 +18,8 @@ Video files on the server's machine can be imported with their picture.
   adding the file again adds it later. The original file is only read.
 - Imported files are identified by content: the same file under another name
   is skipped. They live in `imports/local/KEY/`, are removed with
-  `library delete`, and travel in Library archives.
+  `library delete`, and travel in Library archives. In the TUI, deleting one
+  says that only the imported copy goes and the original file is kept.
 
 ### Changed
 
@@ -520,7 +525,8 @@ easier and fixes live-radio media keys and slow LLM CLI startup.
   playback, relay, media keys, or radio. Intel Macs and other Linux architectures
   build from source.
 
-[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/rath/vtamp/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/rath/vtamp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/rath/vtamp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/rath/vtamp/compare/v0.5.0...v0.5.1
