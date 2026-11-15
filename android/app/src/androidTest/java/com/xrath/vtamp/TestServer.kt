@@ -89,7 +89,7 @@ class TestServer : AutoCloseable {
                         path == "/api/server" ->
                             reply(
                                 wireJson.encodeToJsonElement(
-                                    ServerDescriptor("headless", "test", 14, true, true)
+                                    ServerDescriptor("headless", "test", 15, true, true)
                                 )
                             )
                         path == "/api/rpc" ->
@@ -153,7 +153,7 @@ class TestServer : AutoCloseable {
             .setHeader("Content-Type", "application/json")
             .setBody(
                 buildJsonObject {
-                    put("version", 14)
+                    put("version", 15)
                     put("ok", true)
                     put("data", data)
                 }

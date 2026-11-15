@@ -25,7 +25,7 @@ class ImportsStoreTest {
 
     private fun reply(page: ImportsPage) =
         MockResponse()
-            .setBody("""{"version":14,"ok":true,"data":${wireJson.encodeToString(page)}}""")
+            .setBody("""{"version":15,"ok":true,"data":${wireJson.encodeToString(page)}}""")
 
     @Test
     fun loadingOlderHistoryAndPollingKeepTheRevealedTail() = runBlocking {
@@ -73,7 +73,7 @@ class ImportsStoreTest {
             server.enqueue(
                 MockResponse()
                     .setBody(
-                        """{"version":14,"ok":true,"data":{"job":${wireJson.encodeToString(job(1, added = 1, revision = 2))}}}"""
+                        """{"version":15,"ok":true,"data":{"job":${wireJson.encodeToString(job(1, added = 1, revision = 2))}}}"""
                     )
             )
             var changes = 0
@@ -92,7 +92,7 @@ class ImportsStoreTest {
             server.enqueue(
                 MockResponse()
                     .setBody(
-                        """{"version":14,"ok":true,"data":${wireJson.encodeToString((1..45).map { job(it) })}}"""
+                        """{"version":15,"ok":true,"data":${wireJson.encodeToString((1..45).map { job(it) })}}"""
                     )
             )
             val store = ImportsStore(this) {}

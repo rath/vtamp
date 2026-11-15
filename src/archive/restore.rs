@@ -1,5 +1,5 @@
 use super::*;
-use crate::{model::PlaybackSource, platform, youtube};
+use crate::{model::PlaybackSource, platform, source::Local, youtube};
 use std::time::UNIX_EPOCH;
 use uuid::Uuid;
 
@@ -23,6 +23,9 @@ struct Directory {
     video_id: Option<String>,
     #[serde(default)]
     range: Option<youtube::TimeRange>,
+    /// A local video import; journals written before protocol 15 omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    local_key: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -37,19 +40,35 @@ impl Directory {
             Uuid::parse_str(&self.id).is_ok(),
             "Invalid restore identity"
         );
-        Ok(if let Some(video_id) = &self.video_id {
+        Ok(match self.managed()? {
+            Some((provider, key)) => crate::source::root(paths, provider).join(key),
+            None => paths.data.join("imports/archive").join(&self.id),
+        })
+    }
+
+    /// The provider directory and key of a managed import, validated again
+    /// because the journal is read back from disk during recovery.
+    fn managed(&self) -> Result<Option<(&'static str, String)>> {
+        ensure!(
+            self.video_id.is_none() || self.local_key.is_none(),
+            "Ambiguous restore identity"
+        );
+        if let Some(video_id) = &self.video_id {
             ensure!(
                 youtube::valid_id(video_id),
                 "Invalid restore video identity"
             );
             let range = youtube::TimeRange::normalized(self.range)?;
-            paths
-                .data
-                .join("imports/youtube")
-                .join(youtube::resource_key(video_id, range))
-        } else {
-            paths.data.join("imports/archive").join(&self.id)
-        })
+            return Ok(Some((
+                youtube::PROVIDER,
+                youtube::resource_key(video_id, range),
+            )));
+        }
+        if let Some(key) = &self.local_key {
+            ensure!(Local::valid_key(key), "Invalid restore import identity");
+            return Ok(Some((crate::source::LOCAL_PROVIDER, key.clone())));
+        }
+        Ok(None)
     }
 }
 
@@ -97,7 +116,14 @@ pub(super) fn plan(
             && !videos.insert(source.key())
         {
             report.duplicates += 1;
-            report.note(format!("Skipped existing YouTube track: {title}"));
+            report.note(format!(
+                "Skipped existing {}: {title}",
+                if source.local().is_some() {
+                    "local import"
+                } else {
+                    "YouTube track"
+                }
+            ));
             continue;
         }
         if entry.track.source.is_none() {
@@ -155,10 +181,12 @@ pub(crate) fn prepare(
         let entry = &manifest.tracks[index];
         progress.item(done, &entry.track.title);
         let id = Uuid::new_v4().to_string();
+        let source = entry.track.source.as_ref();
         let dir = Directory {
             id: id.clone(),
-            video_id: entry.track.source.as_ref().map(|s| s.video_id.clone()),
-            range: entry.track.source.as_ref().and_then(|s| s.range),
+            video_id: source.and_then(|s| s.youtube()).map(|s| s.video_id.clone()),
+            range: source.and_then(|s| s.range()),
+            local_key: source.and_then(|s| s.local()).map(|s| s.key.clone()),
         };
         let destination = dir.destination(paths)?;
         let staged = temp.path().join(&id);
@@ -339,14 +367,9 @@ fn rollback(paths: &Paths, journal: &Journal) -> Result<()> {
             fs::symlink_metadata(&destination)?.file_type().is_dir(),
             "Restore cleanup refuses a symlink"
         );
-        let owned = if dir.video_id.is_some() {
-            crate::imports::read_manifest(&destination).is_ok_and(|m| {
-                m.track_id == dir.id
-                    && dir
-                        .video_id
-                        .as_ref()
-                        .is_some_and(|id| m.source.key() == youtube::resource_key(id, dir.range))
-            })
+        let owned = if let Some((_, key)) = dir.managed()? {
+            crate::imports::read_manifest(&destination)
+                .is_ok_and(|m| m.track_id == dir.id && m.source.key() == key)
         } else {
             fs::read(destination.join(".archive-owner.json"))
                 .ok()

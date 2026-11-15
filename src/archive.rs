@@ -25,7 +25,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 const MAX_MANIFEST: u64 = 64 * 1024 * 1024;
 const MAX_TRACKS: usize = 100_000;
 const MAX_REPORTS: usize = 1_000;
@@ -556,7 +556,7 @@ fn valid_hash(hash: &str) -> bool {
 
 fn validate(manifest: &Manifest) -> Result<BTreeMap<String, Asset>> {
     ensure!(
-        manifest.format == "vtamp-library" && matches!(manifest.version, 1 | FORMAT_VERSION),
+        manifest.format == "vtamp-library" && matches!(manifest.version, 1..=FORMAT_VERSION),
         "Unsupported library archive format"
     );
     ensure!(
@@ -602,18 +602,19 @@ fn validate(manifest: &Manifest) -> Result<BTreeMap<String, Asset>> {
         if let Some(source) = &entry.track.source {
             source.validate()?;
             ensure!(
-                manifest.version >= 2 || source.range.is_none(),
+                manifest.version >= 2 || source.range().is_none(),
                 "Time ranges require archive version 2"
             );
             ensure!(
-                crate::youtube::valid_id(&source.video_id) && videos.insert(source.key()),
-                "Invalid or duplicate YouTube identity"
+                manifest.version >= 3 || source.local().is_none(),
+                "Local imports require archive version 3"
             );
+            ensure!(videos.insert(source.key()), "Duplicate import identity");
             ensure!(
                 Path::new(&entry.audio.path)
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("m4a")),
-                "YouTube audio must be included as m4a"
+                "Imported audio must be included as m4a"
             );
             let source_manifest = crate::imports::Manifest {
                 track_id: "00000000-0000-0000-0000-000000000000".into(),
@@ -624,10 +625,10 @@ fn validate(manifest: &Manifest) -> Result<BTreeMap<String, Asset>> {
             };
             ensure!(
                 serde_json::to_vec_pretty(&source_manifest)?.len() < 64 * 1024,
-                "YouTube source manifest exceeds 64 KiB"
+                "Import source manifest exceeds 64 KiB"
             );
         } else {
-            ensure!(entry.video.is_none(), "Video requires a YouTube source");
+            ensure!(entry.video.is_none(), "Video requires an import source");
         }
         ensure!(
             crate::library::supported(Path::new(&entry.audio.path)),

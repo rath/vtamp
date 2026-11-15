@@ -68,7 +68,7 @@ enum Command: Encodable, Equatable, Sendable {
     }
 }
 
-/// `{"version":14,"request":{...}}`.
+/// `{"version":15,"request":{...}}`.
 struct RequestEnvelope: Encodable {
     let version: Int
     let request: Command

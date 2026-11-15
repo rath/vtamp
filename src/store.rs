@@ -926,10 +926,10 @@ mod tests {
         if video {
             std::fs::write(dir.join(crate::video::FILE), b"").unwrap();
         }
-        let source = crate::youtube::Source {
+        let source = crate::source::Source::from(crate::youtube::Source {
             video_id: video_id.into(),
             ..Default::default()
-        };
+        });
         let manifest = crate::imports::Manifest {
             track_id: id.into(),
             source: source.clone(),

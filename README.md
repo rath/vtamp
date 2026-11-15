@@ -354,11 +354,11 @@ vtamp watch --json
 Every JSON response has a protocol version and `ok`. Successful responses have `data`; failures have an error code and message. Times are integer milliseconds, volume is an integer from 0 to 100, and playback status is `playing`, `paused`, or `stopped`.
 
 ```json
-{"version":14,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
+{"version":15,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
 ```
 
 ```json
-{"version":14,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
+{"version":15,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
 ```
 
 Exit status is **0** for success, **1** for a connection or operation failure, and **2** for invalid CLI arguments. Parse the error code; the human message can change. A timeout or disconnect during a mutation has an unknown outcome: inspect the queue or state before retrying a command such as `next` or `queue add`.

@@ -33,7 +33,7 @@ enum VtampError: LocalizedError, Equatable {
 
 /// The server's HTTP API (`vtamp server start --api ADDR`).
 final class VtampClient: Sendable {
-    static let protocolVersion = 14
+    static let protocolVersion = 15
 
     let baseURL: URL
     private let session: URLSession

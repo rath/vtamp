@@ -14,11 +14,11 @@ vtamp watch --json
 Every JSON response has a protocol version and `ok`. Successful responses have `data`; failures have an error code and message. Times are integer milliseconds, volume is an integer from 0 to 100, and playback status is `playing`, `paused`, or `stopped`.
 
 ```json
-{"version":14,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
+{"version":15,"ok":true,"data":{"scanning":true,"job_id":"SCAN_JOB_ID"}}
 ```
 
 ```json
-{"version":14,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
+{"version":15,"ok":false,"error":{"code":"server_unavailable","message":"Cannot connect to vtamp…"}}
 ```
 
 `status` returns `queue`, `current_id`, `status`, `position_ms`, `volume`, `normalization`, `shuffle`, `repeat`, `revision`, `queue_revision`, `play_next`, `scheduled_stop`, `scanning`, and `last_error`. Each queue entry contains `id` and `track`; each track includes its library ID, path, title, artist, album, track number, duration, and optional local cover path. `current_id` identifies a **queue entry**, not a library track. It is null before a current entry is selected. A stopped player may still have a selected entry.
@@ -28,7 +28,7 @@ Every JSON response has a protocol version and `ok`. Successful responses have `
 `watch --json` emits one response envelope per line (NDJSON), starting with a `state` event. Later events are `state`, `progress`, `library_changed`, `scan_completed`, and `shutdown`:
 
 ```json
-{"version":14,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
+{"version":15,"ok":true,"data":{"event":"progress","data":{"position_ms":102000,"revision":7}}}
 ```
 
 State events contain the full state; progress events update position for their matching state revision. Heartbeats occur about once a second, including while paused. A slow subscriber gets a fresh state after event-buffer lag. `Ctrl+C` stops watching without stopping playback.
@@ -182,7 +182,7 @@ and `queue_item_id`, or `kind: "deadline"` and `deadline_ms` (Unix milliseconds)
 
 ## Updating from older protocol versions
 
-This build uses **protocol 14** and migrates the library to **database version 9**
+This build uses **protocol 15** and migrates the library to **database version 9**
 when the new server starts. Stop an older running server using its matching old
 binary before starting the new binary, then reattach TUIs. Restart restores the
 selected track paused and clears stop reservations. Track IDs, queue entries,

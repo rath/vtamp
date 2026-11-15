@@ -30,7 +30,7 @@ class ApiTest {
     fun legacyDefaultsAndUnknownFields() {
         val server =
             wireJson.decodeFromString<ServerDescriptor>(
-                """{"version":"0.1","mode":"headless","protocol_version":14,"future":true}"""
+                """{"version":"0.1","mode":"headless","protocol_version":15,"future":true}"""
             )
         assertFalse(server.importsPagination)
         assertFalse(server.importAvailable)
@@ -71,7 +71,7 @@ class ApiTest {
         MockWebServer().use { server ->
             server.enqueue(
                 MockResponse()
-                    .setBody("""{"version":14,"ok":true,"data":{"job_id":"j","status":"queued"}}""")
+                    .setBody("""{"version":15,"ok":true,"data":{"job_id":"j","status":"queued"}}""")
             )
             val c = VtampClient(server.url("/api"))
             c.rpc<ImportStarted>(
@@ -91,7 +91,7 @@ class ApiTest {
             val request = server.takeRequest()
             assertEquals("/api/rpc", request.path)
             val body = wireJson.parseToJsonElement(request.body.readUtf8()).jsonObject
-            assertEquals(14, body["version"]!!.jsonPrimitive.int)
+            assertEquals(15, body["version"]!!.jsonPrimitive.int)
             val payload = body["request"]!!.jsonObject["request"]!!.jsonObject
             assertEquals(true, payload["video"]!!.jsonPrimitive.boolean)
             assertEquals(83000L, payload["range"]!!.jsonObject["start_ms"]!!.jsonPrimitive.long)
@@ -128,7 +128,7 @@ class ApiTest {
     fun serverQueueRetriesRevisionChangesWithoutMixingPages() = runBlocking {
         MockWebServer().use { server ->
             fun response(data: String) =
-                MockResponse().setBody("""{"version":14,"ok":true,"data":$data}""")
+                MockResponse().setBody("""{"version":15,"ok":true,"data":$data}""")
             server.enqueue(response("""{"status":"paused","queue_revision":1}"""))
             server.enqueue(response("""{"items":[],"total":0,"offset":0,"queue_revision":2}"""))
             server.enqueue(response("""{"status":"paused","queue_revision":2}"""))

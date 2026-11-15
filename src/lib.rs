@@ -23,6 +23,7 @@ mod queue_edit;
 #[cfg(target_os = "macos")]
 pub mod relay;
 pub mod settings;
+pub mod source;
 pub mod spectrum;
 mod spectrum_view;
 pub mod store;

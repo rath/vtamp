@@ -189,7 +189,7 @@ impl Store {
                     title = self
                         .video_record(id)?
                         .and_then(|r| r.track.source)
-                        .map(|s| s.original_title)
+                        .map(|s| s.original_title().to_owned())
                         .filter(|t| usable(t));
                 }
                 if title.is_none() {
@@ -270,7 +270,7 @@ impl Store {
                     },
                     title: m.metadata.title,
                     artist: m.metadata.artist,
-                    album: m.source.music_album.clone().unwrap_or_default(),
+                    album: m.source.album().unwrap_or_default().to_owned(),
                     duration_ms: Some(0),
                     track_number: 0,
                     cover: None,
@@ -285,7 +285,7 @@ impl Store {
     }
     pub fn commit_import(&mut self, p: &mut Publication) -> Result<()> {
         let tx = self.db.transaction()?;
-        tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET manifest=excluded.manifest,metadata=excluded.metadata,title_override=coalesce(track_metadata.title_override,excluded.title_override),artist_override=coalesce(track_metadata.artist_override,excluded.artist_override)",params![p.manifest.track_id,p.manifest.source.video_id,serde_json::to_string(&p.manifest)?,serde_json::to_string(&p.manifest.metadata)?,p.manifest.title_override,p.manifest.artist_override,p.manifest.source.key()])?;
+        tx.execute("INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(id) DO UPDATE SET manifest=excluded.manifest,metadata=excluded.metadata,title_override=coalesce(track_metadata.title_override,excluded.title_override),artist_override=coalesce(track_metadata.artist_override,excluded.artist_override)",params![p.manifest.track_id,p.manifest.source.youtube().map(|s| &s.video_id),serde_json::to_string(&p.manifest)?,serde_json::to_string(&p.manifest.metadata)?,p.manifest.title_override,p.manifest.artist_override,p.manifest.source.key()])?;
         apply_metadata(&tx, &mut p.record.track)?;
         write_record(&tx, &p.record)?;
         save_job(&tx, &p.job)?;
@@ -409,11 +409,11 @@ fn apply_metadata_inner(
         && let Ok(m) = crate::imports::read_manifest(parent)
     {
         if source_keys {
-            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![track.id,m.source.video_id,serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override,m.source.key()])?;
+            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![track.id,m.source.youtube().map(|s| &s.video_id),serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override,m.source.key()])?;
         } else {
             // The v4 album migration must not change the resource schema before
             // the atomic v9 migration has run.
-            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override) VALUES(?1,?2,?3,?4,?5,?6)",params![track.id,m.source.video_id,serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override])?;
+            tx.execute("INSERT OR IGNORE INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override) VALUES(?1,?2,?3,?4,?5,?6)",params![track.id,m.source.youtube().map(|s| &s.video_id),serde_json::to_string(&m)?,serde_json::to_string(&m.metadata)?,m.title_override,m.artist_override])?;
         }
         track.apply_source_album();
     }
@@ -745,7 +745,8 @@ mod tests {
                 video_url: request.url.clone(),
                 original_title: "Artist - Original video (Live)".into(),
                 ..Default::default()
-            },
+            }
+            .into(),
             metadata: Metadata {
                 title: "Saved song".into(),
                 ..Default::default()
@@ -766,7 +767,7 @@ mod tests {
         store.repair_import_titles().unwrap();
         assert_eq!(
             store.import_job(&job.job_id).unwrap().title,
-            manifest.source.original_title
+            manifest.source.original_title()
         );
     }
 
@@ -787,11 +788,11 @@ mod tests {
             ("structured", "Unknown album", Some("Source album")),
             ("tagged", "File album", None),
         ] {
-            let source = crate::youtube::Source {
+            let source = crate::source::Source::from(crate::youtube::Source {
                 video_id: id.into(),
                 music_album: source_album.map(str::to_owned),
                 ..Default::default()
-            };
+            });
             let record = Record {
                 track: Track {
                     id: id.into(),

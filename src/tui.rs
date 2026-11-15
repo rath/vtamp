@@ -3305,7 +3305,7 @@ fn clamp_selection(state: &mut ListState, len: usize) {
 /// The first row line: the title, with a LIVE or VIDEO suffix that names the
 /// row kind the same way in Library and Queue.
 fn title_label(track: &Track) -> String {
-    let title = track.source.as_ref().and_then(|s| s.range).map_or_else(
+    let title = track.source.as_ref().and_then(|s| s.range()).map_or_else(
         || track.title.clone(),
         |r| format!("[{}] {}", r.label(), track.title),
     );
@@ -6073,11 +6073,14 @@ mod tests {
             duration_ms: Some(180_000),
             cover: None,
             video: false,
-            source: Some(crate::youtube::Source {
-                video_id: "abc123".into(),
-                channel_url: Some("https://www.youtube.com/channel/UCtest".into()),
-                ..Default::default()
-            }),
+            source: Some(
+                crate::youtube::Source {
+                    video_id: "abc123".into(),
+                    channel_url: Some("https://www.youtube.com/channel/UCtest".into()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
         }];
         app.total = 1;
         app.library_selection.select(Some(0));

@@ -1102,10 +1102,13 @@ mod tests {
             playback: PlaybackSource::File {
                 path: "/tmp/imports/youtube/lO3lG-qXU14/audio.m4a".into(),
             },
-            source: Some(Source {
-                video_id: "lO3lG-qXU14".into(),
-                ..Default::default()
-            }),
+            source: Some(
+                Source {
+                    video_id: "lO3lG-qXU14".into(),
+                    ..Default::default()
+                }
+                .into(),
+            ),
         })
     }
     #[test]

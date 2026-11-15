@@ -1,4 +1,4 @@
-//! Delete only validated managed downloads; never registered local music.
+//! Delete only validated managed imports; never files in registered folders.
 use crate::{
     audio::PlaybackBackend,
     engine::Engine,
@@ -23,10 +23,10 @@ fn directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn root(paths: &Paths) -> Result<PathBuf> {
+fn root(paths: &Paths, provider: &str) -> Result<PathBuf> {
     let imports = paths.data.join("imports");
     directory(&imports)?;
-    let root = imports.join("youtube");
+    let root = crate::source::root(paths, provider);
     directory(&root)?;
     Ok(root.canonicalize()?)
 }
@@ -44,27 +44,19 @@ fn validate_files(path: &Path) -> Result<imports::Manifest> {
             "Import contains an unexpected file; refusing deletion"
         );
     }
-    let manifest = imports::read_manifest(path)?;
-    ensure!(
-        crate::youtube::valid_id(&manifest.source.video_id),
-        "Invalid managed video ID"
-    );
-    Ok(manifest)
+    // Reading the manifest validates the provider's identity.
+    imports::read_manifest(path)
 }
 
 pub(crate) fn managed_path(paths: &Paths, track: &Track) -> Result<PathBuf> {
     let source = track.source.as_ref().ok_or_else(|| {
         ApiError::new(
             "not_managed",
-            "Only managed YouTube downloads can be deleted; local files are kept",
+            "Only managed imports can be deleted; files in registered folders are kept",
         )
     })?;
-    ensure!(
-        crate::youtube::valid_id(&source.video_id),
-        "Invalid video ID"
-    );
     source.validate()?;
-    let destination = root(paths)?.join(source.key());
+    let destination = root(paths, source.provider())?.join(source.key());
     ensure!(
         track.playback.file() == Some(destination.join("audio.m4a").as_path()),
         "Track is not in its managed download directory"
@@ -202,7 +194,7 @@ pub fn recover(paths: &Paths, store: &Store) -> Result<()> {
             continue;
         }
         let manifest = validate_files(&staged)?;
-        let destination = root(paths)?.join(manifest.source.key());
+        let destination = root(paths, manifest.source.provider())?.join(manifest.source.key());
         if let Some(track) = store.track(&manifest.track_id)? {
             ensure!(
                 track.playback.file() == Some(destination.join("audio.m4a").as_path()),
@@ -275,20 +267,26 @@ mod tests {
     }
 
     fn fixture() -> (tempfile::TempDir, Paths, Store, Track) {
+        fixture_for(
+            Source {
+                video_id: "0OeEx5SiRI0".into(),
+                ..Default::default()
+            }
+            .into(),
+        )
+    }
+
+    fn fixture_for(source: crate::source::Source) -> (tempfile::TempDir, Paths, Store, Track) {
         let home = tempfile::tempdir().unwrap();
         let paths = Paths {
             data: home.path().into(),
             runtime: home.path().join("run"),
             cache: home.path().join("cache"),
         };
-        let folder = home.path().join("imports/youtube/0OeEx5SiRI0");
+        let folder = source.directory(&paths);
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("audio.m4a"), b"test audio").unwrap();
         fs::write(folder.join("cover.jpg"), b"test cover").unwrap();
-        let source = Source {
-            video_id: "0OeEx5SiRI0".into(),
-            ..Default::default()
-        };
         let track = Track {
             id: "download".into(),
             playback: PlaybackSource::File {
@@ -345,6 +343,41 @@ mod tests {
                 .unwrap(),
             9
         );
+    }
+
+    #[test]
+    fn local_imports_delete_their_managed_copy_and_stay_in_their_provider() {
+        let key = "0123456789abcdef0123456789abcdef";
+        let (_home, paths, mut store, track) = fixture_for(
+            crate::source::Local {
+                key: key.into(),
+                original_name: "concert.mkv".into(),
+            }
+            .into(),
+        );
+        let folder = track.playback.file().unwrap().parent().unwrap().to_owned();
+        assert!(folder.ends_with(format!("imports/local/{key}")));
+        fs::write(folder.join("video.mkv"), b"test video").unwrap();
+        // The same files under another provider's identity are not this import.
+        let mut disguised = track.clone();
+        disguised.source = Some(
+            Source {
+                video_id: "0OeEx5SiRI0".into(),
+                ..Default::default()
+            }
+            .into(),
+        );
+        fs::create_dir_all(paths.data.join("imports/youtube")).unwrap();
+        assert!(managed_path(&paths, &disguised).is_err());
+        assert_eq!(
+            managed_path(&paths, &track).unwrap(),
+            folder.canonicalize().unwrap()
+        );
+        let result = delete(&paths, &mut store, &mut engine(State::default()), &track.id).unwrap();
+        assert!(result["warning"].is_null());
+        assert!(!folder.exists());
+        assert!(store.track(&track.id).unwrap().is_none());
+        assert!(store.video_record(key).unwrap().is_none());
     }
 
     #[test]

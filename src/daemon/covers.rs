@@ -148,7 +148,12 @@ impl Runtime {
         let mut skipped = 0;
         let mut targets = Vec::new();
         for record in records {
-            let source = record.track.source.as_ref();
+            // Only YouTube has a thumbnail to fetch again.
+            let source = record
+                .track
+                .source
+                .as_ref()
+                .and_then(crate::source::Source::youtube);
             let file = record
                 .track
                 .playback

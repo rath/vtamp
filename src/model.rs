@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// What a catalog row is: a local audio file, a file with a managed silent
 /// video sidecar, or a registered radio stream. Every row has exactly one kind.
@@ -81,7 +81,7 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub video: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<crate::youtube::Source>,
+    pub source: Option<crate::source::Source>,
 }
 
 impl Track {
@@ -108,10 +108,10 @@ impl Track {
     }
 
     pub(crate) fn apply_source_album(&mut self) {
-        if let Some(album) = self.source.as_ref().and_then(|s| s.music_album.as_ref())
+        if let Some(album) = self.source.as_ref().and_then(|s| s.album())
             && !album.trim().is_empty()
         {
-            self.album = album.clone();
+            self.album = album.to_owned();
         }
         self.album = self.album_name().unwrap_or_default().to_owned();
     }

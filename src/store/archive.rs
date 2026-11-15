@@ -96,7 +96,12 @@ impl Store {
                 "INSERT INTO track_metadata(id,video_id,manifest,metadata,title_override,artist_override,album_override,source_key) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
                 params![
                     record.track.id,
-                    record.track.source.as_ref().map(|s| &s.video_id),
+                    record
+                        .track
+                        .source
+                        .as_ref()
+                        .and_then(|s| s.youtube())
+                        .map(|s| &s.video_id),
                     manifest.map(|m| serde_json::to_string(&m)).transpose()?,
                     serde_json::to_string(&saved.automatic)?,
                     saved.title, saved.artist, saved.album,

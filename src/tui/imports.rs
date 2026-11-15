@@ -612,13 +612,17 @@ impl App {
             self.notice("Select a track in Library or Queue to open its YouTube link.");
             return;
         };
-        let url = track.source.as_ref().and_then(|s| {
-            if channel {
-                s.channel_url.clone()
-            } else {
-                Some(crate::youtube::video_url(&s.video_id))
-            }
-        });
+        let url = track
+            .source
+            .as_ref()
+            .and_then(|s| s.youtube())
+            .and_then(|s| {
+                if channel {
+                    s.channel_url.clone()
+                } else {
+                    Some(crate::youtube::video_url(&s.video_id))
+                }
+            });
         let Some(url) = url else {
             self.notice(format!(
                 "Selected track ({}) has no YouTube source link.",

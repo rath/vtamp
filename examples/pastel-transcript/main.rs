@@ -94,7 +94,7 @@ async fn load(
     let Some(track) = &context.track else {
         return notice("Nothing is playing.");
     };
-    let Some(source) = &track.source else {
+    let Some(source) = track.source.as_ref().and_then(|source| source.youtube()) else {
         return notice("This track has no YouTube transcript.");
     };
     notice("Loading transcript…")?;

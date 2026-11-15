@@ -1,4 +1,4 @@
-# Local protocol, version 14
+# Local protocol, version 15
 
 The CLI is the recommended automation interface. These details are for contributors building another local client.
 
@@ -7,13 +7,13 @@ The CLI is the recommended automation interface. These details are for contribut
 Connect to the per-user Unix socket printed by `vtamp doctor --json`. Send a four-byte unsigned **big-endian** byte count, followed by that many bytes of UTF-8 JSON. The limit is 16 MiB in either direction. A normal connection handles one request and one reply, then closes. Request reads and reply writes have deadlines; an idle or slow client cannot block playback.
 
 ```json
-{"version":14,"request":{"command":"pause"}}
+{"version":15,"request":{"command":"pause"}}
 ```
 
 The `Command`, `Request`, `Reply`, `State`, and `Event` types in `src/model.rs` are the source of truth for field names. Commands are internally tagged with `command` in snake_case. Paths supplied by clients must be absolute; the CLI resolves relative paths before sending them. The server's working directory is not the invoking shell's directory.
 
 ```json
-{"version":14,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
+{"version":15,"ok":false,"error":{"code":"version_mismatch","message":"Client and server protocol versions differ; restart the server with this binary"}}
 ```
 
 A version mismatch is rejected before dispatch. There is no TCP listener and no network discovery. Socket permissions restrict clients to the same OS user.
@@ -60,14 +60,14 @@ At most four direct imports and one catalog scan run at a time. There are bounde
 
 ## Watch
 
-Send `{"version":14,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
+Send `{"version":15,"request":{"command":"watch"}}`. The first reply contains the current `State`. Keep the connection open. Subsequent frames contain success envelopes whose `data` is an `Event`:
 
 ```json
-{"version":14,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
+{"version":15,"ok":true,"data":{"event":"state","data":{"queue":[],"current_id":null,"direct":null,"queue_cursor":null,"status":"stopped","position_ms":0,"volume":70,"normalization":{"enabled":true,"target_lufs":-18.0,"ready":0,"pending":0,"failed":0,"unmeasurable":0,"applied_gain_db":null},"shuffle":false,"repeat":"off","revision":0,"queue_revision":0,"play_next":[],"scheduled_stop":null,"scanning":false,"last_error":null,"stream_status":null}}}
 ```
 
 ```json
-{"version":14,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
+{"version":15,"ok":true,"data":{"event":"progress","data":{"position_ms":1000,"revision":7}}}
 ```
 
 `library_changed` and `shutdown` have no data payload. Watch subscriptions are established before the initial snapshot is taken. A client should ignore queued state events with revisions lower than its most recent snapshot and progress events whose revision does not match its current state. On event-buffer lag, the server obtains and emits a new snapshot. Reconnect after a dropped stream and replace local state from the new snapshot; never infer the server's lifetime from one UI connection.
@@ -76,7 +76,7 @@ The CLI's NDJSON watch output normalizes the first snapshot into a `state` event
 
 ## Spectrum subscription
 
-Send `{"version":14,"request":{"command":"spectrum_watch"}}` on a separate
+Send `{"version":15,"request":{"command":"spectrum_watch"}}` on a separate
 connection. The first and subsequent replies contain a `SpectrumFrame` directly
 in `data`, not a `State` or `Event`. Fields are `generation`, nullable `current_id`,
 `active`, `low_hz`, `high_hz`, and `levels` (32 finite values in 0–1). An initial
@@ -282,11 +282,11 @@ rules: one per track start, seek, and resume, silence while paused or after a
 track ends, an end-of-stream page on stop. Radio playback is not cast. Without
 `--cast` a device server has no cast at all.
 
-Send `{"version":14,"request":{"command":"cast_watch"}}` on a separate connection.
+Send `{"version":15,"request":{"command":"cast_watch"}}` on a separate connection.
 The first reply is a success envelope whose `data` is a `CastInfo`:
 
 ```json
-{"version":14,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
+{"version":15,"ok":true,"data":{"available":true,"codec":"opus","container":"ogg","bitrate":128000,"sample_rate":48000,"channels":2,"listeners":1}}
 ```
 
 After that reply the connection carries raw Ogg pages without length prefixes,
@@ -383,7 +383,7 @@ address as usual. For other ports, supply an explicit `IP:PORT`;
 | Route | Answer |
 | --- | --- |
 | `GET /api/server` | Envelope whose `data` is `server_info` plus `protocol_version`, `import_available`, `imports_pagination`, and `cast` (`CastInfo`). |
-| `POST /api/rpc` | The body is a socket `Request` (`{"version":14,"request":{...}}`, at most 1 MiB); the answer is the socket `Reply`. |
+| `POST /api/rpc` | The body is a socket `Request` (`{"version":15,"request":{...}}`, at most 1 MiB); the answer is the socket `Reply`. |
 | `GET`/`HEAD /api/library/ID/audio` | The audio file of Library track `ID`. |
 | `GET`/`HEAD /api/library/ID/cover` | The cover image of Library track `ID`. |
 | `GET`/`HEAD /api/library/ID/video` | The saved silent video sidecar (`video.mkv`) of Library track `ID`, as stored. |
@@ -422,7 +422,7 @@ several ranges or an invalid header answer the whole file. A matching
 served with keep-alive; a connection that sends no request headers for 30
 seconds is closed.
 
-The Android and iOS apps use this same version-14 contract. Both keep a local
+The Android and iOS apps use this same contract. Both keep a local
 playback queue, read the server queue without changing it, and fetch files by
 Library track ID. Android ships its own ALAC decoder; this requires no server
 codec, protocol change, or database migration.
@@ -484,8 +484,14 @@ all → video → radio in Library.
 
 ## Compatibility and storage
 
-All envelopes advertise protocol 14. Protocol 14 adds the HTTP API and
-`server_info.api_url`; the database version stays 9. Protocol 13 added optional YouTube import
+All envelopes advertise protocol 15. Protocol 15 makes the Track `source` a
+provider-tagged value and adds the `local` provider next to `youtube`; the
+database version stays 9, because a local import has no video ID and uses the
+existing resource key column. Clients built for protocol 14 read every source
+as a YouTube source, so they must report `version_mismatch`. Library archives
+move to format version 3 for the same reason; versions 1 and 2 still restore.
+Protocol 14 added the HTTP API and
+`server_info.api_url`; the database version stayed 9. Protocol 13 added optional YouTube import
 ranges and range-aware lookup. Database version 9 replaces the unique video ID
 constraint with a unique resource key (video ID plus normalized range), preserving
 track IDs, metadata, queue, and sessions in a transactional migration. Existing
@@ -567,10 +573,13 @@ never starts a server; the newest 100 reports are held in memory, and unavailabl
 reports return `archive_job_not_found`. Relays reject these wire commands with
 `archive_local_only`; the CLI also rejects export and dry-run through a relay.
 
-The independent archive writer uses version 2; the reader accepts versions 1 and 2.
-Version 2 preserves optional source ranges and deduplicates video ID/range pairs;
-version 1 must not contain ranges. Older readers reject version 2 rather than
-misidentifying an excerpt as the complete video. A gzip-compressed tar begins with
+The independent archive writer uses version 3; the reader accepts versions 1 to 3.
+Version 3 adds tracks whose `source` has `provider: local`, restored to
+`imports/local/KEY/` and deduplicated by that key; earlier versions must not
+contain them. Version 2 preserves optional source ranges and deduplicates video ID/range pairs;
+version 1 must not contain ranges. Older readers reject a newer version rather than
+misidentifying an excerpt as the complete video or a local import as a YouTube
+download. A gzip-compressed tar begins with
 `manifest.json`, followed by allowlisted regular files at its root. Audio is
 `ARTIST - TITLE.ext` and video is `ARTIST - TITLE.mkv`. Unknown/empty artists are
 omitted. Names use NFC Unicode, sanitize unsafe characters, bound the stem to
@@ -801,9 +810,15 @@ failed report commit leaves a recoverable sidecar, recognized on retry. Scans do
 not index MKV sidecars as tracks. Managed deletion includes the sidecar. Metadata edits update queued copies without changing queue order,
 current entry, playback position, or queue revision. Audio files are not rewritten.
 
-The Track's optional `source` contains `provider: youtube`, `video_id`, canonical
-`video_url`, original title, channel identity/name/URL, a bounded description,
-and any structured music metadata. Local tracks omit it. A Track whose managed
+The Track's optional `source` is tagged by `provider`. `provider: youtube`
+carries `video_id`, canonical `video_url`, original title, channel
+identity/name/URL, a bounded description, and any structured music metadata.
+`provider: local` (version 15) carries `key`, the first 32 lowercase hexadecimal
+digits of the imported file's SHA-256, and `original_name`, that file's name
+without its directory. An unknown or missing provider is rejected. Managed
+imports live in `imports/PROVIDER/KEY/`; the two key forms cannot collide,
+since a YouTube key starts with an 11-character video ID. Files in registered
+folders omit `source`. A Track whose managed
 sidecar exists also carries `video: true` (see Library kinds). The CLI preview performs
 extraction locally and an optional read-only lookup; it never starts a server or
 creates a database/job.

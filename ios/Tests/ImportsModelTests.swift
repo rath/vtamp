@@ -83,7 +83,7 @@ private final class ImportsStub: URLProtocol {
 @Suite(.serialized)
 struct ImportsModelTests {
     private func reply(_ data: Any, hold: Bool = false, fail: Bool = false) throws -> ImportsStub.Reply {
-        ImportsStub.Reply(data: try JSONSerialization.data(withJSONObject: ["version": 14, "ok": true, "data": data]),
+        ImportsStub.Reply(data: try JSONSerialization.data(withJSONObject: ["version": 15, "ok": true, "data": data]),
                           hold: hold, fail: fail)
     }
     private func job(_ id: Int, running: Bool = false, revision: Int = 1, added: Int = 0) -> [String: Any] {
@@ -100,7 +100,7 @@ struct ImportsModelTests {
                   hold: hold, fail: fail)
     }
     private func server(pagination: Bool) throws -> ImportsStub.Reply {
-        var descriptor: [String: Any] = ["mode": "headless", "version": "0.5.1", "protocol_version": 14, "import_available": true]
+        var descriptor: [String: Any] = ["mode": "headless", "version": "0.5.1", "protocol_version": 15, "import_available": true]
         if pagination { descriptor["imports_pagination"] = true }
         return try reply(descriptor)
     }
@@ -242,7 +242,7 @@ struct ImportsModelTests {
     }
 
     @Test func aPrunedActiveReportStillInvalidatesLibrary() async throws {
-        let missing = ImportsStub.Reply(data: Data(#"{"version":14,"ok":false,"error":{"code":"import_not_found","message":"No longer retained"}}"#.utf8))
+        let missing = ImportsStub.Reply(data: Data(#"{"version":15,"ok":false,"error":{"code":"import_not_found","message":"No longer retained"}}"#.utf8))
         let (app, client, model) = try await setup([
             server(pagination: true), page(40, 21, cursor: "v1:21", active: [job(1, running: true)]),
             page(40, 21, cursor: "v1:21"), missing, page(40, 21, cursor: "v1:21"),

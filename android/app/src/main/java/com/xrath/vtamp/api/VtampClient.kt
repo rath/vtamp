@@ -61,7 +61,7 @@ class VtampClient(
             .build(),
 ) {
     companion object {
-        const val PROTOCOL_VERSION = 14
+        const val PROTOCOL_VERSION = 15
     }
 
     fun file(track: Track, part: String): String =

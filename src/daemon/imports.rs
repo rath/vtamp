@@ -266,7 +266,7 @@ impl Runtime {
                     }
                     jobs::publish(paths, &mut p)?;
                     // Register only after publication; future scans include completed files.
-                    store.add_root(&paths.data.join("imports/youtube"))?;
+                    store.add_root(&crate::source::root(paths, p.manifest.source.provider()))?;
                     store.commit_import(&mut p)?;
                     Ok(())
                 })();

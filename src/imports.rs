@@ -5,8 +5,9 @@ use crate::{
     metadata::{self, Metadata},
     model::unix_ms,
     platform::Paths,
+    source::Source,
     subprocess::{self, Cancel},
-    youtube::{self, DownloadProgress, Source},
+    youtube::{self, DownloadProgress},
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -392,7 +393,7 @@ fn work(
                 && job.title == job.url
                 && let Some(source) = existing.as_ref().and_then(|r| r.track.source.as_ref())
             {
-                job.title = source.original_title.clone();
+                job.title = source.original_title().to_owned();
             }
             if let Some(record) = &existing
                 && record
@@ -481,14 +482,14 @@ fn work(
                     track_id: existing
                         .map(|r| r.track.id)
                         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                    source,
+                    source: source.into(),
                     metadata,
                     title_override: request.title.clone(),
                     artist_override: request.artist.clone(),
                 }
             };
             if !request.playlist && job.title == job.url {
-                job.title = manifest.source.original_title.clone();
+                job.title = manifest.source.original_title().to_owned();
             }
             // Repairing missing audio must not discard a previously downloaded video.
             let old_video = final_dir.join(crate::video::FILE);
@@ -586,7 +587,7 @@ pub fn read_manifest(dir: &std::path::Path) -> Result<Manifest> {
     Ok(manifest)
 }
 pub fn publish(paths: &Paths, publication: &mut Publication) -> Result<()> {
-    let root = paths.data.join("imports/youtube");
+    let root = crate::source::root(paths, publication.manifest.source.provider());
     crate::platform::private_dir(&root)?;
     let destination = root.join(publication.manifest.source.key());
     if destination.exists() {
@@ -648,11 +649,15 @@ fn add_video(
     {
         bail!("Managed video identity mismatch");
     }
+    let source = manifest
+        .source
+        .youtube()
+        .context("Managed import is not a YouTube download")?;
     let existing = dir.join(crate::video::FILE);
     let ready = existing.symlink_metadata().is_ok_and(|m| m.is_file())
         && crate::video::probe(&existing, config, stop)
-            .is_ok_and(|info| manifest.source.range.is_none() || info.exact_clip);
-    if ready && manifest.source.range.is_none() {
+            .is_ok_and(|info| source.range.is_none() || info.exact_clip);
+    if ready && source.range.is_none() {
         item.video_status = Some("ready".into());
         return Ok(());
     }
@@ -660,7 +665,7 @@ fn add_video(
     job.progress = Default::default();
     update(
         job,
-        if manifest.source.range.is_some() {
+        if source.range.is_some() {
             "resolving_video"
         } else {
             "downloading_video"
@@ -673,10 +678,10 @@ fn add_video(
     let root = paths.data.join("imports/.staging");
     crate::platform::private_dir(&root)?;
     let stage = tempfile::Builder::new().prefix("video-").tempdir_in(root)?;
-    if !ready && manifest.source.range.is_some() {
+    if !ready && source.range.is_some() {
         youtube::extract_range(
             &youtube::video_url(&item.video_id),
-            manifest.source.range,
+            source.range,
             config,
             stop,
         )?;
@@ -684,7 +689,7 @@ fn add_video(
     if !ready {
         update(job, "downloading_video", send);
         let mut last = Instant::now() - Duration::from_secs(1);
-        youtube::download_video(&manifest.source, stage.path(), config, stop, |progress| {
+        youtube::download_video(source, stage.path(), config, stop, |progress| {
             let stage = if progress.processed_ms.is_some() {
                 "processing_video"
             } else {
@@ -700,12 +705,12 @@ fn add_video(
             }
         })?;
     }
-    let repaired = if manifest.source.range.is_some() {
+    let repaired = if source.range.is_some() {
         youtube::repair_clip_audio(&dir.join("audio.m4a"), stage.path(), config, stop)?
     } else {
         None
     };
-    let audio = if manifest.source.range.is_some() {
+    let audio = if source.range.is_some() {
         let path = repaired.clone().unwrap_or_else(|| dir.join("audio.m4a"));
         let tag = mp4ameta::Tag::read_from_path(&path)?;
         let file = path.metadata()?;

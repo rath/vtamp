@@ -124,8 +124,11 @@ pub async fn run(
     store.interrupt_scans(unix_ms())?;
     store.repair_import_titles()?;
     store.interrupt_imports()?;
-    if paths.data.join("imports/youtube").is_dir() {
-        store.add_root(&paths.data.join("imports/youtube"))?;
+    for provider in crate::source::PROVIDERS {
+        let root = crate::source::root(&paths, provider);
+        if root.is_dir() {
+            store.add_root(&root)?;
+        }
     }
     let state = store.restore()?;
     let (sender, receiver) = mpsc::sync_channel(64);
@@ -755,6 +758,7 @@ fn worker(
                         Command::LibraryRetag { id } => {
                             let source = store.track(&id).and_then(|t| {
                                 t.and_then(|t| t.source)
+                                    .and_then(crate::source::Source::into_youtube)
                                     .context("Track has no YouTube source")
                             });
                             match source {

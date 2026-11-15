@@ -48,7 +48,8 @@ fn fixture() -> (tempfile::TempDir, Paths, Store, PathBuf) {
             original_title: "원래 제목".into(),
             music_album: Some("Original album".into()),
             ..Default::default()
-        },
+        }
+        .into(),
         metadata: Metadata {
             title: "Title".into(),
             artist: "Artist".into(),
@@ -119,7 +120,9 @@ fn archive_ranges_roundtrip_without_collapsing_full_or_other_excerpts() {
     for (start, end) in [("1", "2"), ("3", "")] {
         let mut manifest = original.clone();
         manifest.track_id = format!("clip-{start}");
-        manifest.source.range = crate::youtube::TimeRange::from_text(start, end).unwrap();
+        let mut source = original.source.clone().into_youtube().unwrap();
+        source.range = crate::youtube::TimeRange::from_text(start, end).unwrap();
+        manifest.source = source.into();
         let dir = paths
             .data
             .join("imports/youtube")
@@ -165,6 +168,68 @@ fn archive_ranges_roundtrip_without_collapsing_full_or_other_excerpts() {
     assert_eq!(restored.records().unwrap().len(), 4);
     let downgraded = paths.data.join("invalid-v1.tar.gz");
     rewrite(&archive, &downgraded, |m| m.version = 1, false);
+    assert!(preview(&target, &downgraded).is_err());
+}
+
+#[test]
+fn local_imports_roundtrip_into_their_own_provider_directory() {
+    let (_home, paths, mut store, _) = fixture();
+    let key = "0123456789abcdef0123456789abcdef";
+    let dir = paths.data.join("imports/local").join(key);
+    fs::create_dir_all(&dir).unwrap();
+    fs::copy(
+        paths.data.join("imports/youtube/VIDEO000001/audio.m4a"),
+        dir.join("audio.m4a"),
+    )
+    .unwrap();
+    let manifest = crate::imports::Manifest {
+        track_id: "original-import".into(),
+        source: crate::source::Local {
+            key: key.into(),
+            original_name: "공연 실황.mkv".into(),
+        }
+        .into(),
+        metadata: Metadata {
+            title: "Imported".into(),
+            artist: "Artist".into(),
+            method: "tags".into(),
+            warning: None,
+        },
+        title_override: None,
+        artist_override: None,
+    };
+    platform::atomic_json(&dir.join("source.json"), &manifest).unwrap();
+    let mut imported = record(&dir.join("audio.m4a"), &manifest.track_id, &paths);
+    imported.track.source = Some(manifest.source.clone());
+    let mut records = store.records().unwrap();
+    records.push(imported);
+    store.replace_catalog(&records).unwrap();
+
+    let archive = paths.data.join("local.tar.gz");
+    assert_eq!(export(&paths, &archive).unwrap().included, 3);
+    let (_home, target, mut restored) = empty();
+    assert_eq!(restore(&target, &mut restored, &archive).added, 3);
+    let record = restored.video_record(key).unwrap().unwrap();
+    assert_eq!(record.track.source, Some(manifest.source));
+    assert_eq!(
+        crate::deletion::managed_path(&target, &record.track).unwrap(),
+        target.data.join("imports/local").join(key)
+    );
+    assert_eq!(restore(&target, &mut restored, &archive).added, 0);
+    let scan = library::scan(
+        &restored.roots().unwrap(),
+        &restored.records().unwrap(),
+        &target.cache,
+    );
+    restored.replace_catalog(&scan.records).unwrap();
+    assert_eq!(restored.records().unwrap().len(), 3);
+    assert_eq!(
+        restored.video_record(key).unwrap().unwrap().track.id,
+        record.track.id
+    );
+    // Readers from before local imports would take this for a YouTube source.
+    let downgraded = paths.data.join("invalid-v2.tar.gz");
+    rewrite(&archive, &downgraded, |m| m.version = 2, false);
     assert!(preview(&target, &downgraded).is_err());
 }
 

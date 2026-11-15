@@ -15,8 +15,12 @@ use std::{
     time::Duration,
 };
 
+/// The provider name in a track's `source` and the directory under `imports/`.
+pub const PROVIDER: &str = "youtube";
+
+/// Serialized inside [`crate::source::Source`], which adds the provider tag.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default, tag = "provider", rename = "youtube")]
+#[serde(default)]
 pub struct Source {
     pub video_id: String,
     #[serde(
