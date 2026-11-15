@@ -139,6 +139,14 @@ pub fn youtube_available(paths: &Paths) -> bool {
         .is_some_and(|c| executable(c.yt_dlp.as_deref(), "yt-dlp").is_ok())
 }
 
+/// Video file imports need only the converters, not the downloader.
+pub fn files_available(paths: &Paths) -> bool {
+    YoutubeConfig::load(paths).ok().is_some_and(|c| {
+        executable(c.ffmpeg.as_deref(), "ffmpeg").is_ok()
+            && executable(c.ffprobe.as_deref(), "ffprobe").is_ok()
+    })
+}
+
 impl YoutubeConfig {
     pub fn load(paths: &Paths) -> Result<Self> {
         Ok(Settings::load(paths)?.youtube)

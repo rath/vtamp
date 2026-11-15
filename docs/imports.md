@@ -3,6 +3,8 @@
 vtamp remains a local music player. If an executable `yt-dlp` is available on
 PATH (or at a configured absolute path), it also offers YouTube audio imports with optional video.
 Without it, related CLI help, TUI controls, and diagnostic messages are hidden.
+With `ffmpeg` and `ffprobe` installed it also [imports video files](#import-a-video-file)
+from this machine, which needs no `yt-dlp`.
 vtamp never installs tools, enables cookies, or selects an LLM automatically.
 There is no separate Cargo feature or special build.
 
@@ -90,17 +92,69 @@ one) gains a cover when the refresh succeeds, and tracks whose cover bytes are
 already current are left untouched. The job report lives in server memory:
 restarting the server loses it, and re-running the command is safe.
 
+## Import a video file
+
+`library add` takes a video file as well as a folder or a URL. A folder is
+registered in place; a file is converted into a managed copy that plays with
+its picture in the TUI and the apps. This needs installed `ffmpeg` (with
+libx264) and `ffprobe`, and no `yt-dlp`. Without them the related CLI help is
+hidden, and naming a file answers that both tools are required.
+
+```sh
+vtamp library add ~/Videos/concert.mkv --wait
+vtamp library add ~/Videos/concert.mkv --audio-only
+vtamp library add ~/Videos/concert.mkv --title 'Song title' --artist 'Performers' --wait
+```
+
+The file needs both a picture and sound. A file without a video stream is
+refused: register its folder instead. The original is only read, never moved,
+rewritten, or deleted. The copy lives in the data directory's
+`imports/local/KEY/` with the same `audio.m4a`, optional `cover.jpg` and
+`video.mkv`, and `source.json` as a download. `KEY` is the first 32 hexadecimal
+digits of the file's SHA-256, so the same content is one import whatever its
+name or folder, and adding it again is skipped.
+
+The picture is saved unless `--audio-only` is given; the CLI does not ask.
+Adding the same file again without `--audio-only` gives an audio-only import
+its video and keeps the track ID, metadata overrides, and Queue. `--start`,
+`--end`, `--playlist`, `--preview`, and `--clipboard` apply to YouTube URLs
+only. Each command imports one file.
+
+| Part | Rule |
+| --- | --- |
+| Audio | The default audio stream, otherwise the first. AAC or ALAC in one or two channels is copied bit for bit. Anything else is encoded to AAC at 256 kbit/s stereo or 128 kbit/s mono; more channels are mixed down to stereo and rates above 48 kHz are resampled to 48 kHz. |
+| Video | The first video stream that is not cover art. It is always encoded to H.264 (`libx264 -preset fast -crf 18`, 4:2:0, no B frames), at most 480 pixels high, never enlarged, with square pixels. Stored rotation is applied and interlaced video is deinterlaced. |
+| Cover | The embedded cover picture, otherwise the frame a tenth of the way in. A failed cover is a warning, not a failed import. |
+| Title and artist | The container's `title` and `artist` tags, otherwise the file name read with the `Artist - Title` rules under [Metadata and source links](#metadata-and-source-links). `--title` and `--artist` are saved as overrides. No LLM is consulted. |
+
+Picture time zero is the first audio sample. When the original's picture starts
+later than its sound, the first frame is held for the difference; when it
+starts earlier, the frames before the sound are dropped. HDR video is converted
+without tone mapping, and the item report warns that colors may look flat.
+Subtitles, chapters, and other audio streams are not imported.
+
+The job runs in the same queue as downloads, so `--wait`, `imports`,
+`import-status`, `import-cancel`, and `import-retry` work the same way. Its
+stages are `resolving` (hashing and probing the file), `processing_audio`,
+`processing` (the cover), `indexing`, and `processing_video`. Audio is
+registered first: a failed or cancelled video encode keeps it, and a retry
+encodes only the picture. `library delete TRACK_ID` removes the managed copy
+and leaves the original. Run the command on the server's machine; the path is
+read there, and the HTTP API refuses it. The TUI and the apps have no
+file-import screen.
+
 ## Archive downloaded resources
 
 To move or back up downloaded resources, use `library export FILE` and
 `library import FILE`, described in [Portable Library archives](archives.md).
 Archive commands remain available without yt-dlp or an LLM. They always include
-local audio and YouTube downloads, with current tags and covers embedded in audio
-copies. Saved video is exported as an MKV with sound, using installed FFmpeg and
+local audio, YouTube downloads, and imported video files, with current tags and
+covers embedded in audio copies. Saved video is exported as an MKV with sound, using installed FFmpeg and
 FFprobe; restore separates its picture stream back into the silent `video.mkv`.
 Source information and overrides, including a cleared album, remain in the manifest. Restored YouTube resources use the usual managed directory and
 remain compatible with rescanning, retagging, cover refresh, and managed deletion.
-Existing video ID/range pairs are skipped as complete archive entries; restore does not
+Restored video file imports return to `imports/local/KEY/`.
+Existing video ID/range pairs and local import keys are skipped as complete archive entries; restore does not
 upgrade their sidecars. Historical download job reports are not restored.
 
 ## Download a time range
@@ -166,8 +220,9 @@ deleted from disk, all queued copies will be removed, and playback will stop if
 this is the current track. Enter deletes; Esc cancels. The equivalent CLI command
 is `vtamp library delete TRACK_ID` and deletes without an interactive prompt.
 
-Deletion is limited to vtamp's own full or excerpt directories under `imports/youtube/` with
-matching source records. Files registered through `library add FOLDER` are
+Deletion is limited to vtamp's own directories with matching source records: full
+or excerpt downloads under `imports/youtube/` and imported video files under
+`imports/local/`. Files registered through `library add FOLDER` are
 original files, not copies, and cannot be deleted this way. Remove a folder
 registration with `library remove FOLDER` instead. Radio entries are unregistered
 without deleting files.
@@ -274,7 +329,8 @@ target the selection in Library or Queue, which can differ from Now Playing.
 If the link is missing, the notice names the selected track. A video
 page starts playing by itself, so `o` pauses a playing track once the browser
 launches; `O` leaves playback alone, and neither key resumes anything. Track JSON
-contains this information in `source` (`provider: youtube`).
+contains this information in `source` (`provider: youtube`). An imported video
+file has `provider: local` with its key and original file name, and no links.
 
 Audio downloads prefer m4a; FFmpeg extracts/converts to m4a when needed. Opt-in
 video downloads choose the best stream at or below 480 pixels high, without a
@@ -322,7 +378,8 @@ position is ready, including while paused, without briefly showing the cover.
 Dialogs that cover the image, hidden tmux windows, and detach suspend or end video
 work. Resize and track changes discard obsolete frames. Missing video uses the cover. Missing tools or failed decoding show one notice
 and fall back to the cover; toggle video off/on to retry.
-Remote video streaming and general video-file imports are not supported.
+Remote video streaming is not supported. Video files are added with
+[`library add FILE`](#import-a-video-file).
 
 Video buffers and terminal image IDs are bounded; delayed frames are dropped.
 The decoder reuses its RGB buffer, including when skipping late frames. Local

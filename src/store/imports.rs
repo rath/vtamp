@@ -233,7 +233,7 @@ impl Store {
                 let item: ImportItem = serde_json::from_str(&s)?;
                 if (!matches!(item.status.as_str(), "completed" | "updated" | "skipped")
                     || (request.video && item.video_status.as_deref() != Some("ready")))
-                    && crate::youtube::valid_id(&item.video_id)
+                    && (request.path.is_some() || crate::youtube::valid_id(&item.video_id))
                 {
                     ids.push(item.video_id);
                 }
@@ -241,7 +241,10 @@ impl Store {
             if ids.is_empty() {
                 bail!("No retryable unfinished videos");
             }
-            request.video_ids = Some(ids);
+            // A file import is one item named by its path, not by frozen IDs.
+            if request.path.is_none() {
+                request.video_ids = Some(ids);
+            }
         }
         Ok(request)
     }

@@ -3,12 +3,20 @@ use serde_json::Value;
 
 /// yt-dlp and its FFmpeg downloader share stdout. Only completed FFmpeg
 /// progress blocks produce updates; diagnostic stderr remains private.
-pub(super) struct ProgressParser {
+pub(crate) struct ProgressParser {
     range: Option<TimeRange>,
     current: DownloadProgress,
 }
 
 impl ProgressParser {
+    /// An FFmpeg run over a whole file of known length, with no transfer.
+    pub fn whole(duration_ms: u64) -> Self {
+        Self::new(Some(TimeRange {
+            start_ms: 0,
+            end_ms: Some(duration_ms),
+        }))
+    }
+
     pub fn new(range: Option<TimeRange>) -> Self {
         Self {
             range,

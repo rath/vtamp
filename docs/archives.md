@@ -1,7 +1,8 @@
 # Portable Library archives
 
 Export the entire Library into one `.tar.gz`, including local audio files,
-YouTube downloads, saved video, metadata edits, and registered radio names/URLs:
+YouTube downloads, imported video files, saved video, metadata edits, and
+registered radio names/URLs:
 
 ```sh
 vtamp library export ~/Desktop/library.tar.gz
@@ -37,7 +38,8 @@ needs free space for those copies as well as the tarball. Existing output files
 are never overwritten. Missing audio, failed tagging, or failed video remuxing
 fails the export and cleans up its temporary files. A missing cover is reported.
 
-Restore merges into the existing Library. YouTube video ID/time-range pairs, original/exported
+Restore merges into the existing Library. YouTube video ID/time-range pairs,
+imported video file keys, original/exported
 audio checksums, and normalized radio URLs detect duplicates; existing files and
 metadata win. Embedded artwork is restored for Library display, and MKV video
 is converted back to vtamp's silent sidecar without re-encoding. Duplicate tracks

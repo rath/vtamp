@@ -396,8 +396,9 @@ read `ok` and `error.code` exactly as on the socket. A body that is not a
 same queue, timeout, and replies as a socket request. Commands that hold a
 connection open (`watch`, `spectrum_watch`, `cast_watch`), `shutdown`, and
 commands that name server paths (`library_add`, `library_remove`,
-`archive_import`, `stream_preview`, `play_direct` with `path`, and `play` or
-`queue_add` with non-empty `paths`) fail with `not_available_over_http`: over
+`archive_import`, `stream_preview`, `import_start` with `path`, `play_direct`
+with `path`, and `play` or `queue_add` with non-empty `paths`) fail with
+`not_available_over_http`: over
 HTTP, files are chosen by track ID. There is no event stream yet; poll `now`,
 `queue_page`, or `imports_page` (`imports` on older servers).
 
@@ -648,8 +649,9 @@ Database version remains 6.
 ## Optional installed-tool imports
 
 `library_delete` takes a Library track `id` and returns
-`{"deleted":"TRACK_ID","warning":null}` after deleting a managed YouTube
-download's audio, optional video, cover, source metadata, and catalog entry. The
+`{"deleted":"TRACK_ID","warning":null}` after deleting a managed import's
+(a YouTube download's or an imported video file's) audio, optional video, cover,
+source metadata, and catalog entry. The
 source manifest, canonical managed path, and regular files must match; symlinks, extra files, and
 local originals are refused. The operation emits `library_changed` only on
 success. It removes all matching Queue entries and play-next reservations,
@@ -672,7 +674,9 @@ before retrying. A later explicit import downloads a fresh copy.
 
 The server detects an executable `yt-dlp` on its PATH or at the configured path.
 Without it, clients omit import controls/help/status messages. Nothing is installed
-automatically. See [configuration and workflows](imports.md).
+automatically. See [configuration and workflows](imports.md). Video file imports
+are detected the same way from `ffmpeg` and `ffprobe` and need no `yt-dlp`;
+`import_available` reports `yt-dlp` only.
 
 | Command | Request fields | Successful data |
 | --- | --- | --- |
@@ -743,6 +747,27 @@ ID must match its URL. Playlists are capped at 10,000 entries. There are at most
 workers. Jobs run in submission order; configuration is captured at submission.
 Retries capture the current configuration rather than the original job's settings.
 
+A request can instead name a video file on the server's machine (version 15):
+an absolute `path`, with optional `video`, `title`, `artist`, and
+`source_title`. `url` is then omitted, or equal to the path's `file://` URL,
+which the job reports as its `url`; `playlist`, `range`, and `video_ids` are
+rejected. `import_start` answers `feature_unavailable` without installed
+`ffmpeg` and `ffprobe` and `file_not_found` when the path is not a regular
+file; over the HTTP API it answers `not_available_over_http`. The job has one
+item, planned after the file is hashed and probed during `resolving`. Its
+`video_id` is the local source key, and its `video_status` passes through
+`processing` instead of `downloading`. Stages are `resolving`,
+`processing_audio`, `processing`, `indexing`, and `processing_video`;
+`progress.bytes`/`total` count hashed bytes during `resolving`, and
+`processed_ms`/`processing_total_ms` count media time during both conversions.
+The same content is one resource: an existing key with present audio is
+skipped, or gains a missing video when `video` is true, reported as `updated`.
+`import_retry` repeats the same path for an unfinished item or a requested
+video that is not ready. `import_preview`, `import_lookup`, `cover_refresh`,
+and `library_retag` remain YouTube-only. The managed directory is
+`imports/local/KEY/`, published, scanned, deleted, and recovered like a
+download's.
+
 Jobs carry `job_id`, normalized source URL, title, status/stage, nullable total
 and current item, added/skipped/failed counts, bytes/total/speed/ETA, timestamps,
 error, and a monotonically increasing revision. Range processing adds optional
@@ -755,8 +780,9 @@ source-length lookup before a video upgrade. No timer-generated percentages are
 emitted. Terminal statuses are completed,
 partial, failed, cancelled, and interrupted. Items carry an index, video ID,
 title, status, optional track ID, metadata result/warning, and error. Video-enabled
-requests additionally report `video_status` (`queued`, `downloading`, `ready`, or
-`failed`) and `video_error`; audio-only items leave these null. Cancelled or
+requests additionally report `video_status` (`queued`, `downloading` or, for a
+file import, `processing`, then `ready` or `failed`) and `video_error`;
+audio-only items leave these null. Cancelled or
 interrupted reports can retain a pending video status, indicating unfinished work.
 Jobs add `updated` (video added to existing audio) and `video_failed` counts,
 defaulting to zero in old reports. `added + updated + skipped + failed` counts

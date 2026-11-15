@@ -49,7 +49,10 @@ source codec. On macOS, saved video plays in the cover area through Kitty or
 Sixel and follows the server audio; `w` switches video/cover and `F` toggles
 fullscreen within the current terminal pane. Existing audio-only
 imports can gain video without changing their identity or queue. Without it, the interface,
-help, and diagnostics show no integration controls or prompts. Imports run in the
+help, and diagnostics show no integration controls or prompts. Installed FFmpeg
+and FFprobe alone let the CLI import a video file from the server's machine:
+its sound and a picture encoded to at most 480p become a managed copy that plays
+like a download with saved video, and the original file is only read. Imports run in the
 server with visible progress, per-item failures, cancellation, and retry. Metadata
 uses deterministic rules by default; users can opt into an API or installed CLI
 for metadata cleanup. LLM configuration is shared across features and available

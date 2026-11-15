@@ -207,6 +207,9 @@ fn allowed(command: &Command) -> Result<(), ApiError> {
         Command::Watch | Command::SpectrumWatch | Command::CastWatch | Command::Shutdown => {
             local("This command is only available on the local socket")
         }
+        Command::ImportStart { request } if request.path.is_some() => {
+            local("Server paths are not accepted over HTTP; use the local socket")
+        }
         Command::ArchiveImport { .. }
         | Command::StreamPreview { .. }
         | Command::LibraryAdd { .. }
@@ -426,6 +429,7 @@ mod tests {
             serde_json::json!({"command":"play_direct","path":"/a.m4a"}),
             serde_json::json!({"command":"play","paths":["/a.m4a"],"track":null,"queue_item":null}),
             serde_json::json!({"command":"queue_add","paths":["/a.m4a"],"track":null}),
+            serde_json::json!({"command":"import_start","request":{"path":"/a.mkv"}}),
         ] {
             let error = allowed(&command(denied.clone())).unwrap_err();
             assert_eq!(error.code, "not_available_over_http", "{denied}");

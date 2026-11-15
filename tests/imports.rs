@@ -756,23 +756,44 @@ async fn frozen_playlist_titles_survive_queueing_and_resolution_failures() {
     assert!(!calls.contains("--flat-playlist"));
 }
 #[test]
-fn absent_downloader_keeps_optional_features_out_of_help() {
+fn absent_tools_keep_their_optional_features_out_of_help() {
     let h = Harness::new();
-    fs::remove_file(h.home.path().join("bin/yt-dlp")).unwrap();
-    for args in [
-        vec!["--help"],
-        vec!["library", "--help"],
-        vec!["library", "add", "--help"],
-    ] {
-        let o = h.cmd(&args);
-        let text = String::from_utf8_lossy(&o.stdout).to_lowercase();
+    let help = |args: &[&str]| {
+        let o = h.cmd(args);
         assert!(o.status.success());
+        String::from_utf8_lossy(&o.stdout).to_lowercase()
+    };
+    let pages: [&[&str]; 3] = [
+        &["--help"],
+        &["library", "--help"],
+        &["library", "add", "--help"],
+    ];
+    // The converters alone offer video file imports, and nothing of the downloader.
+    fs::remove_file(h.home.path().join("bin/yt-dlp")).unwrap();
+    for args in pages {
+        let text = help(args);
+        for word in ["youtube", "yt-dlp", "playlist", "clipboard", "--start"] {
+            assert!(!text.contains(word), "{word}: {text}");
+        }
+    }
+    assert!(help(&["library", "--help"]).contains("import-status"));
+    let add = help(&["library", "add", "--help"]);
+    for word in ["video file", "--audio-only", "--title"] {
+        assert!(add.contains(word), "{word}: {add}");
+    }
+    // Without them only folder registration remains.
+    fs::remove_file(h.home.path().join("bin/ffmpeg")).unwrap();
+    for args in pages {
+        let text = help(args);
         for word in [
             "youtube",
             "yt-dlp",
             "playlist",
             "clipboard",
             "import-status",
+            "video file",
+            "--audio-only",
+            "--title",
         ] {
             assert!(!text.contains(word), "{word}: {text}");
         }

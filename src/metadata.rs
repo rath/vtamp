@@ -17,6 +17,15 @@ pub struct Metadata {
     #[serde(default)]
     pub warning: Option<String>,
 }
+impl Metadata {
+    /// Add a warning without losing an earlier one.
+    pub fn warn(&mut self, text: String) {
+        self.warning = Some(match self.warning.take() {
+            Some(earlier) => format!("{earlier}; {text}"),
+            None => text,
+        });
+    }
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Extracted {

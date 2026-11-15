@@ -374,10 +374,10 @@ pub enum Library {
         /// Read one YouTube URL from the macOS clipboard.
         #[arg(long)]
         clipboard: bool,
-        /// Also download a silent video up to 480p.
+        /// Also save a silent video up to 480p; the default for a video file.
         #[arg(long, conflicts_with = "audio_only")]
         video: bool,
-        /// Download audio only without asking.
+        /// Save audio only without asking.
         #[arg(long)]
         audio_only: bool,
         /// Start a single-video download at seconds, M:SS or H:MM:SS.
@@ -652,12 +652,17 @@ pub async fn run(args: Args) -> Result<()> {
                 if !crate::import_config::youtube_available(&paths) {
                     return Err(ApiError::new(
                         "invalid_arguments",
-                        "Library input must be an existing music folder",
+                        if crate::import_config::files_available(&paths) {
+                            "Library input must be an existing music folder or video file"
+                        } else {
+                            "Library input must be an existing music folder"
+                        },
                     )
                     .into());
                 }
                 let mut request = crate::imports::ImportRequest {
                     url: input,
+                    path: None,
                     playlist,
                     title,
                     artist,
@@ -698,25 +703,30 @@ pub async fn run(args: Args) -> Result<()> {
                         }
                     }
                 }
-                client.ensure().await?;
-                let reply = client.request(Command::ImportStart { request }).await?;
-                let id = reply.clone().into_data()?["job_id"]
-                    .as_str()
-                    .context("Missing import job ID")?
-                    .to_owned();
-                if wait {
-                    return output(
-                        wait_for_import(&client, &id, timeout, args.json).await?,
-                        args.json,
-                    );
+                return start_import(&client, request, wait, timeout, args.json).await;
+            }
+            // A file is converted into a managed copy; a folder is registered
+            // in place. The server reads the path, so it is made absolute here.
+            let path = platform::absolute(std::path::Path::new(&input))?;
+            if !clipboard && path.is_file() {
+                if start.is_some() || end.is_some() || playlist || preview {
+                    return Err(ApiError::new(
+                        "invalid_arguments",
+                        "Time ranges, playlists and previews require a YouTube URL",
+                    )
+                    .into());
                 }
-                if !args.json {
-                    println!(
-                        "Import started: {id}\nCheck progress: vtamp library import-status {id}"
-                    );
-                    return Ok(());
-                }
-                return output(reply, true);
+                let mut request = crate::imports::ImportRequest {
+                    path: Some(path),
+                    video: !audio_only,
+                    title,
+                    artist,
+                    ..Default::default()
+                };
+                request
+                    .validate()
+                    .map_err(|error| ApiError::new("invalid_arguments", format!("{error:#}")))?;
+                return start_import(&client, request, wait, timeout, args.json).await;
             }
             if clipboard
                 || video
@@ -728,18 +738,22 @@ pub async fn run(args: Args) -> Result<()> {
                 || title.is_some()
                 || artist.is_some()
             {
+                let files = crate::import_config::files_available(&paths);
+                let youtube = crate::import_config::youtube_available(&paths);
                 return Err(ApiError::new(
                     "invalid_arguments",
-                    "YouTube options require a YouTube URL",
+                    match (youtube, files) {
+                        (true, true) => {
+                            "These options require a YouTube URL or an existing video file"
+                        }
+                        (false, true) => "These options require an existing video file",
+                        _ => "YouTube options require a YouTube URL",
+                    },
                 )
                 .into());
             }
             client.ensure().await?;
-            let mut reply = client
-                .request(Command::LibraryAdd {
-                    path: platform::absolute(std::path::Path::new(&input))?,
-                })
-                .await?;
+            let mut reply = client.request(Command::LibraryAdd { path }).await?;
             if wait {
                 let id = reply.clone().into_data()?["job_id"]
                     .as_str()
@@ -1892,6 +1906,30 @@ pub(crate) async fn preview_import(
     }
     Ok(result)
 }
+/// Queue an import and either wait for its report or name the job to check.
+async fn start_import(
+    client: &Client,
+    request: crate::imports::ImportRequest,
+    wait: bool,
+    timeout: Option<u64>,
+    json: bool,
+) -> Result<()> {
+    client.ensure().await?;
+    let reply = client.request(Command::ImportStart { request }).await?;
+    let id = reply.clone().into_data()?["job_id"]
+        .as_str()
+        .context("Missing import job ID")?
+        .to_owned();
+    if wait {
+        return output(wait_for_import(client, &id, timeout, json).await?, json);
+    }
+    if !json {
+        println!("Import started: {id}\nCheck progress: vtamp library import-status {id}");
+        return Ok(());
+    }
+    output(reply, true)
+}
+
 async fn wait_for_import(
     client: &Client,
     id: &str,
@@ -1955,58 +1993,97 @@ async fn wait_for_import(
 
 /// Optional integrations are discoverable only on machines that have yt-dlp.
 /// This performs no subprocess execution, network request, or filesystem write.
-pub fn command_with_features(available: bool) -> clap::Command {
+pub fn command_with_features(features: Features) -> clap::Command {
     use clap::CommandFactory;
+    let Features { youtube, files } = features;
+    let (about, input) = match (youtube, files) {
+        (true, true) => (
+            "Register a music folder, import a video file, or import a YouTube URL",
+            "A music folder, a video file, or a YouTube URL",
+        ),
+        (true, false) => (
+            "Register a music folder or import a YouTube URL",
+            "A music folder or a YouTube URL",
+        ),
+        (false, true) => (
+            "Register a music folder or import a video file",
+            "A music folder or a video file",
+        ),
+        (false, false) => ("Register a music folder", "A music folder"),
+    };
     let mut command = Args::command().mut_subcommand("library", |c| {
         c.mut_subcommand("add", |a| {
-            a.about(if available {
-                "Register a music folder or import a YouTube URL"
-            } else {
-                "Register a music folder"
-            })
+            a.about(about).mut_arg("path", |arg| arg.help(input))
         })
     });
-    if !available {
+    // Each optional tool shows only its own commands and options.
+    fn hidden(mut command: clap::Command, names: &[&'static str]) -> clap::Command {
+        for name in names {
+            command = command.mut_subcommand(name, |s| s.hide(true));
+        }
+        command
+    }
+    if !youtube {
         command = command
             .mut_subcommand("youtube", |c| c.hide(true))
-            .mut_subcommand("library", |mut c| {
-                for name in [
-                    "imports",
-                    "import-status",
-                    "import-cancel",
-                    "import-retry",
-                    "cover",
-                    "edit",
-                    "retag",
-                ] {
-                    c = c.mut_subcommand(name, |s| s.hide(true));
-                }
-                c.mut_subcommand("add", |mut a| {
-                    for name in [
-                        "clipboard",
-                        "video",
-                        "audio_only",
-                        "start",
-                        "end",
-                        "playlist",
-                        "preview",
-                        "title",
-                        "artist",
-                    ] {
+            .mut_subcommand("library", |c| {
+                hidden(c, &["cover", "retag"]).mut_subcommand("add", |mut a| {
+                    for name in ["clipboard", "start", "end", "playlist", "preview"] {
                         a = a.mut_arg(name, |arg| arg.hide(true));
                     }
                     a
                 })
             });
     }
+    if !youtube && !files {
+        command = command.mut_subcommand("library", |c| {
+            hidden(
+                c,
+                &[
+                    "imports",
+                    "import-status",
+                    "import-cancel",
+                    "import-retry",
+                    "edit",
+                ],
+            )
+            .mut_subcommand("add", |mut a| {
+                for name in ["video", "audio_only", "title", "artist"] {
+                    a = a.mut_arg(name, |arg| arg.hide(true));
+                }
+                a
+            })
+        });
+    }
     command
 }
+
+/// The optional import tools found on this machine, which decide what help shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Features {
+    /// yt-dlp: YouTube imports.
+    pub youtube: bool,
+    /// FFmpeg and FFprobe: video file imports.
+    pub files: bool,
+}
+
+impl Features {
+    pub fn discover() -> Self {
+        let paths = Paths::discover().ok();
+        Self {
+            youtube: paths
+                .as_ref()
+                .is_some_and(crate::import_config::youtube_available),
+            files: paths
+                .as_ref()
+                .is_some_and(crate::import_config::files_available),
+        }
+    }
+}
+
 pub fn parse_args() -> std::result::Result<Args, clap::Error> {
     use clap::FromArgMatches;
-    let available = Paths::discover()
-        .ok()
-        .is_some_and(|p| crate::import_config::youtube_available(&p));
-    let matches = command_with_features(available).try_get_matches()?;
+    let matches = command_with_features(Features::discover()).try_get_matches()?;
     let args = Args::from_arg_matches(&matches)?;
     let selected = args
         .theme

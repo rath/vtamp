@@ -42,6 +42,7 @@ On an Apple Silicon Mac, `brew install rath/tap/vtamp` is all it takes; see [Ins
 - A read-only audio spectrum with fourteen styles, and nine color themes plus custom JSON palettes.
 - macOS media keys and Now Playing metadata, including album art, after detaching.
 - Optional YouTube audio imports through an installed yt-dlp, with optional video up to 480p played in the terminal.
+- Optional video file imports through installed FFmpeg: `library add FILE` saves the sound and a 480p picture as a managed copy.
 - Portable Library archives: one `.tar.gz` of playable media with current tags and covers.
 - A JSON CLI and event stream for scripts and agents, with atomic queue edits, retry receipts, scan reports, and server-owned sleep timers.
 - An optional tmux status-bar plugin for the current track and playback time.
@@ -213,7 +214,8 @@ Run `vtamp --help` or `vtamp COMMAND --help` for argument details. All non-TUI c
 | `queue move ID INDEX` | Move an entry to a **zero-based** destination index |
 | `queue clear` | Stop playback and empty the queue |
 | `library add PATH`, `library remove PATH` | Register/unregister a directory; never delete music files |
-| `library delete TRACK_ID` | Permanently delete a managed YouTube download and all queued copies; refuses local originals |
+| `library add FILE [--audio-only] [--title TEXT] [--artist TEXT] [--wait]` | With installed FFmpeg, [import a video file](docs/imports.md#import-a-video-file) as a managed copy with a 480p picture; the original is only read |
+| `library delete TRACK_ID` | Permanently delete a managed import (a YouTube download or an imported video file) and all queued copies; refuses files in registered folders |
 | `library scan [--wait] [--timeout 60s]` | Rescan and optionally await a report; add/remove also accept wait options |
 | `library scan-status JOB_ID` | Inspect a running or recent scan |
 | `library cover refresh [TRACK_ID\|all] [--wait]` | Re-fetch thumbnails and rebuild covers for managed YouTube imports |
@@ -238,7 +240,7 @@ Run `vtamp --help` or `vtamp COMMAND --help` for argument details. All non-TUI c
 
 The queue is capped at 10,000 entries. Queue entry IDs are distinct from library track IDs: adding a song twice produces two independently editable entries. Library IDs survive rescans of the same canonical path; a file moved to a different path is a new library entry. Scans are explicit, not filesystem watchers, and a damaged file produces a warning while other files continue scanning.
 
-`library export` writes the whole Library, including YouTube downloads, saved video, metadata edits, and radio registrations, into one `.tar.gz` whose media files play in other players after a plain extraction; `library import` merges such an archive into another Library and skips tracks it already has. See [Portable Library archives](docs/archives.md).
+`library export` writes the whole Library, including YouTube downloads, imported video files, saved video, metadata edits, and radio registrations, into one `.tar.gz` whose media files play in other players after a plain extraction; `library import` merges such an archive into another Library and skips tracks it already has. See [Portable Library archives](docs/archives.md).
 
 ## Live radio
 

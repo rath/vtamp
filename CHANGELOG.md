@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+Video files on the server's machine can be imported with their picture.
+
+### Added
+
+- `vtamp library add FILE` imports a video file with installed FFmpeg and
+  FFprobe, without yt-dlp. The sound becomes `audio.m4a` (AAC and ALAC stereo
+  are copied, anything else is encoded to stereo AAC) and the picture a silent
+  H.264 `video.mkv` at most 480 pixels high, so it plays in the TUI and the
+  apps like a download with saved video. `--audio-only` skips the picture;
+  adding the file again adds it later. The original file is only read.
+- Imported files are identified by content: the same file under another name
+  is skipped. They live in `imports/local/KEY/`, are removed with
+  `library delete`, and travel in Library archives.
+
+### Changed
+
+- The Track `source` is tagged by provider, with `local` next to `youtube`.
+- `library delete` and the archive commands accept both kinds of managed import.
+
+### Upgrade notes
+
+- The protocol version is 15. Stop an older server with its own binary, start
+  the new one, and reattach TUIs; rebuild and reinstall the iPhone and Android
+  apps, which require a matching version.
+- Library archives are written as format version 3. Older vtamp builds refuse
+  them; versions 1 and 2 still restore.
+- The database stays at version 9.
+
 ## [0.5.3] — 2026-10-27
 
 An Android app in `android/` plays the Library, its saved videos, and radio over

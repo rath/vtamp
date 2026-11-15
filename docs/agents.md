@@ -134,6 +134,25 @@ Playback commands such as `next` and relative `seek`, legacy single-track adds,
 and path imports do not have this retry guarantee: inspect state after an
 unknown outcome before retrying.
 
+## Import a video file
+
+With installed FFmpeg and FFprobe, `library add` given a file instead of a
+folder converts it into a managed copy with a 480p picture
+([details](imports.md#import-a-video-file)). It is an import job, not a scan:
+
+```sh
+vtamp library add ~/Videos/concert.mkv --wait --json
+vtamp library import-status JOB_ID --json
+```
+
+`--wait` returns the job and its single item, whose `track_id` is the Library
+track; without it the reply is `{job_id, status: "queued"}`. A job that is not
+`completed` exits nonzero with `import_failed`. `partial` means the audio is in
+the Library and the picture failed; `library import-retry JOB_ID` encodes only
+the picture. Adding the same content again is skipped, so a repeat after an
+unknown outcome is safe. The track's `source` is
+`{"provider":"local","key":"…","original_name":"concert.mkv"}`.
+
 ## Wait for scans and inspect results
 
 ```sh

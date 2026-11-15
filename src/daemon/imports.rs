@@ -159,12 +159,36 @@ impl Runtime {
     ) -> Result<Reply> {
         request.validate()?;
         let config = crate::import_config::Config::load(paths)?;
-        crate::subprocess::executable(config.youtube.yt_dlp.as_deref(), "yt-dlp").map_err(|e| {
-            ApiError::new("feature_unavailable", {
-                let _ = e;
-                "This optional import feature is unavailable"
-            })
-        })?;
+        if let Some(path) = &request.path {
+            // A file import needs no downloader, only the converters.
+            for (name, tool) in [
+                ("ffmpeg", config.youtube.ffmpeg.as_deref()),
+                ("ffprobe", config.youtube.ffprobe.as_deref()),
+            ] {
+                crate::subprocess::executable(tool, name).map_err(|_| {
+                    ApiError::new(
+                        "feature_unavailable",
+                        "Importing a video file requires installed ffmpeg and ffprobe",
+                    )
+                })?;
+            }
+            if !path.metadata().is_ok_and(|m| m.is_file()) {
+                return Err(ApiError::new(
+                    "file_not_found",
+                    format!("Import file does not exist: {}", path.display()),
+                )
+                .into());
+            }
+        } else {
+            crate::subprocess::executable(config.youtube.yt_dlp.as_deref(), "yt-dlp").map_err(
+                |_| {
+                    ApiError::new(
+                        "feature_unavailable",
+                        "This optional import feature is unavailable",
+                    )
+                },
+            )?;
+        }
         let job = ImportJob::new(&request);
         store.create_import(&job, &request)?;
         self.configs.insert(job.job_id.clone(), config);
@@ -239,7 +263,7 @@ impl Runtime {
                         anyhow::bail!("Import cancelled");
                     }
                     let record = store
-                        .video_record(&crate::youtube::resource_key(&p.item.video_id, p.job.range))?
+                        .video_record(&p.job.key(&p.item))?
                         .context("Imported track disappeared")?;
                     let publication = jobs::publish_video(paths, &p, &record)?;
                     // Flag the indexed row and queued copies now; a file that

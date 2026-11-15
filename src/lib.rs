@@ -13,6 +13,7 @@ pub mod import_config;
 pub mod imports;
 pub mod library;
 pub mod llm;
+mod local;
 pub mod loudness;
 pub mod media_controls;
 pub mod metadata;

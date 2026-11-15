@@ -15,6 +15,14 @@ checks excerpt sync using generated pictures and audio on loopback. It covers
 AV1/VP9 sources, seeks, short/open-ended clips, chapter cleanup, and packet
 preservation for full downloads; no YouTube, cookies, or LLM is used.
 
+With installed FFmpeg (libx264) and FFprobe,
+`cargo test --locked --lib local::tests::real_files_convert_to_aligned_managed_media -- --ignored`
+converts generated video files whose picture or sound starts half a second
+late. It checks that copied and re-encoded audio keep the picture change and
+the tone as far apart as in the original, and the 480p H.264 sidecar and cover.
+The default suite runs the import job with fake tools in `tests/local_imports.rs`
+and encodes nothing.
+
 Headless cast tests wait for published Ogg pages separately from playback
 completion: encoding and page buffering can make them observable at different times.
 

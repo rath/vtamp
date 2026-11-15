@@ -1,5 +1,6 @@
 mod progress;
 mod range;
+pub(crate) use progress::ProgressParser;
 pub use range::{TimeRange, parse_time, resource_key};
 
 use crate::{

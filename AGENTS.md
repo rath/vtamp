@@ -34,7 +34,7 @@ This file holds only cross-cutting rules for agents. Behavior specifications liv
 | Development checks, optional live checks, website deployment, screenshots | `docs/development.md` |
 | Wire protocol, CLI/agent contracts, queue edits, receipts, scans, reservations, radio, migrations | `docs/protocol.md` |
 | TUI layout and interaction, spectrum, imports and radio UI, website | `DESIGN.md`, `PRODUCT.md`, `docs/themes.md` |
-| Optional yt-dlp imports and LLM metadata | `docs/imports.md`, `docs/llm.md` |
+| Optional yt-dlp imports, video file imports, and LLM metadata | `docs/imports.md`, `docs/llm.md` |
 
 Read the relevant document before changing behavior and update it in the same
 change. When prose disagrees with the code, check the code and correct the prose.
@@ -53,7 +53,7 @@ Put new feature details in those documents, not here.
 | Spectrum analysis and drawing | `src/spectrum.rs`, `src/spectrum_view.rs`, `src/spectrum_view/` |
 | Media keys, Now Playing, app bundle | `src/media_controls.rs`, `src/media_controls/`, `build.rs` |
 | Library, persistence, radio registrations | `src/library.rs`, `src/store.rs`, `src/store/`, `src/streams.rs` |
-| Imports and LLM metadata | `src/imports.rs`, `src/youtube.rs`, `src/subprocess.rs`, `src/import_config.rs`, `src/metadata.rs`, `src/covers.rs`, `src/llm.rs`, `src/llm/`, `src/prompts/` |
+| Imports and LLM metadata | `src/imports.rs`, `src/source.rs`, `src/youtube.rs`, `src/local.rs`, `src/subprocess.rs`, `src/import_config.rs`, `src/metadata.rs`, `src/covers.rs`, `src/llm.rs`, `src/llm/`, `src/prompts/` |
 | CLI and TUI | `src/cli.rs`, `src/main.rs`, `src/tui.rs`, `src/tui/` |
 | Artwork, themes, client settings | `src/artwork.rs`, `src/cover.rs`, `src/theme.rs`, `src/settings.rs` |
 | tmux status | `src/tmux.rs`, `vtamp.tmux`, `scripts/tmux-status.sh` |
@@ -194,7 +194,9 @@ The documents above hold the full contracts; these are the most common regressio
   hook. The media-server app bundle is ad-hoc signed with an identifier equal to
   `CFBundleIdentifier`; never require a personal certificate or Apple developer account.
 - Optional tools are detected at runtime, never installed or bundled. Without
-  yt-dlp, no import controls, hints, help, or doctor messages appear. Child
+  yt-dlp, no import controls, hints, help, or doctor messages appear. Video file
+  imports need only FFmpeg and FFprobe; without them their CLI help is hidden,
+  and the original file is never written. Child
   processes run off the playback and input loops and are cancelled by process
   group. The LLM defaults to `none`; credentials live in Keychain or an environment
   variable name, never plaintext config; connection tests send only a generic
