@@ -105,7 +105,7 @@ class ApiTest {
             client.unwrap<JsonElement>(200 to fixture("rpc-error.json"))
         }
         assertThrows(ApiException::class.java) {
-            client.unwrap<JsonElement>(200 to """{"version":15,"ok":true,"data":{}}""")
+            client.unwrap<JsonElement>(200 to """{"version":14,"ok":true,"data":{}}""")
         }
         assertThrows(ApiException::class.java) { client.unwrap<JsonElement>(503 to "offline") }
     }
