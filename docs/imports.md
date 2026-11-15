@@ -118,7 +118,9 @@ The picture is saved unless `--audio-only` is given; the CLI does not ask.
 Adding the same file again without `--audio-only` gives an audio-only import
 its video and keeps the track ID, metadata overrides, and Queue. `--start`,
 `--end`, `--playlist`, `--preview`, and `--clipboard` apply to YouTube URLs
-only. Each command imports one file.
+only. Each command imports one file. A file that also sits in a registered
+folder under a supported audio extension, such as `.mp4`, keeps its own
+audio-only Library entry from the folder scan beside the import.
 
 | Part | Rule |
 | --- | --- |
