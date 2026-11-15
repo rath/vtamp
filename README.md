@@ -172,7 +172,7 @@ Read-only commands (`status`, `watch`, volume without a value, queue listing, li
 | `Ctrl+Enter` | Play the selected Library track without adding it to Queue |
 | `e` | Append a library track without interrupting playback; duplicates allowed |
 | `A` | Queue every track the Library view shows, in one atomic append that skips tracks Queue already holds |
-| `x` / `d` | Remove a queue entry; in Library, delete a YouTube download or unregister a stream after confirmation |
+| `x` / `d` | Remove a queue entry; in Library, delete a YouTube download or an imported video file, or unregister a stream, after confirmation |
 | `X` | Empty the Queue after a confirmation dialog |
 | `J` / `K` | Move the selected queue entry down / up; unavailable while a queue filter is applied |
 | `v` | Toggle the read-only audio spectrum |

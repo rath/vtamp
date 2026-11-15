@@ -827,10 +827,11 @@ impl App {
         }
         if processing.is_some() {
             lines.push(Line::styled(
-                if job.stage == "processing_video" {
-                    "Encoding an accurately timed video clip."
-                } else {
-                    "Preparing the requested audio interval."
+                match (job.local(), job.stage == "processing_video") {
+                    (true, true) => "Scaling and encoding the picture.",
+                    (true, false) => "Extracting the sound from the file.",
+                    (false, true) => "Encoding an accurately timed video clip.",
+                    (false, false) => "Preparing the requested audio interval.",
                 },
                 Style::default().fg(p.muted),
             ));
@@ -860,7 +861,11 @@ impl App {
             }
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(format!("YouTube: {}", job.title)));
+        lines.push(Line::from(format!(
+            "{}: {}",
+            if job.local() { "File" } else { "YouTube" },
+            job.title
+        )));
         if let Some(error) = &job.error {
             lines.push(Line::styled(
                 format!("Error: {error}"),
@@ -1224,9 +1229,12 @@ fn retryable(job: &ImportJob) -> bool {
     )
 }
 
-fn import_outcomes(job: &ImportJob) -> Vec<String> {
+pub(super) fn import_outcomes(job: &ImportJob) -> Vec<String> {
     if !job.terminal() {
         return vec![match job.stage.as_str() {
+            "resolving" if job.local() => "Reading the file…".into(),
+            "processing_audio" if job.local() => "Converting audio…".into(),
+            "processing_video" if job.local() => "Encoding video (up to 480p)…".into(),
             "queued" => "Waiting to start…".into(),
             "resolving" => "Looking up the YouTube source…".into(),
             "metadata" => "Preparing track details…".into(),

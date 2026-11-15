@@ -217,7 +217,9 @@ the range without creating a server, database, or job.
 In Library, select a YouTube download and press `d` or `x`. The confirmation
 names the track and explains that its downloaded audio, video, and cover will be
 deleted from disk, all queued copies will be removed, and playback will stop if
-this is the current track. Enter deletes; Esc cancels. The equivalent CLI command
+this is the current track. Enter deletes; Esc cancels. An imported video file
+is deleted the same way, and its confirmation says that only the imported copy
+goes and the original file is kept. The equivalent CLI command
 is `vtamp library delete TRACK_ID` and deletes without an interactive prompt.
 
 Deletion is limited to vtamp's own directories with matching source records: full

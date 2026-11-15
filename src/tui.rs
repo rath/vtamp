@@ -399,6 +399,8 @@ enum Confirm {
     DeleteDownload {
         id: String,
         title: String,
+        /// An imported video file, whose original stays on disk.
+        file: bool,
     },
 }
 
@@ -2439,13 +2441,16 @@ impl App {
                             id: t.id.clone(),
                             name: t.title.clone(),
                         });
-                    } else if t.source.is_some() {
+                    } else if let Some(source) = &t.source {
                         self.confirm = Some(Confirm::DeleteDownload {
                             id: t.id.clone(),
                             title: t.title.clone(),
+                            file: source.local().is_some(),
                         });
                     } else {
-                        self.notice("Local files are kept. Only downloaded YouTube tracks can be deleted here.");
+                        self.notice(
+                            "Files in registered folders are kept; only imports can be deleted here.",
+                        );
                     }
                 }
             }
@@ -2861,6 +2866,14 @@ impl App {
                     " Enter empty · Esc cancel ",
                 )
             }
+            Confirm::DeleteDownload {
+                title, file: true, ..
+            } => (
+                " Delete import ",
+                format!("Delete {title}?"),
+                "Deletes the imported copy.\nKeeps the original file.\nRemoves all queued copies.\nStops this track if current.",
+                " Enter delete · Esc cancel ",
+            ),
             Confirm::DeleteDownload { title, .. } => (
                 " Delete download ",
                 format!("Delete {title}?"),
@@ -4604,8 +4617,77 @@ mod tests {
         app.tracks[0].source = None;
         app.key(key(KeyCode::Char('d')), &commands).unwrap();
         assert!(app.confirm.is_none());
-        assert!(app.notice.contains("Local files are kept"));
+        assert!(app.notice.contains("Files in registered folders are kept"));
         assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn deleting_an_imported_file_says_the_original_is_kept() {
+        let mut app = youtube_app(PlaybackStatus::Stopped);
+        app.tracks[0].source = Some(
+            crate::source::Local {
+                key: "0123456789abcdef0123456789abcdef".into(),
+                original_name: "concert.mkv".into(),
+            }
+            .into(),
+        );
+        let (commands, mut requests) = mpsc::channel(8);
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        app.key(key(KeyCode::Char('d')), &commands).unwrap();
+        assert!(matches!(
+            app.confirm,
+            Some(Confirm::DeleteDownload { file: true, .. })
+        ));
+        for (width, height) in [(40, 12), (80, 24), (120, 36)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            for expected in [
+                "Delete import",
+                "Deletes the imported copy",
+                "Keeps the original file",
+                "Removes all queued copies",
+                "Stops this track if current",
+                "Enter delete",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{expected} at {width}x{height}: {text}"
+                );
+            }
+            assert!(!text.contains("Cannot be undone"), "{text}");
+            assert!(!text.to_lowercase().contains("youtube"), "{text}");
+        }
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        assert!(
+            matches!(requests.try_recv().unwrap(), Command::LibraryDelete { id } if id == "track")
+        );
+
+        // A file import's progress never speaks of YouTube or clips.
+        let mut job = crate::imports::ImportJob::new(&crate::imports::ImportRequest::default());
+        job.url = "file:///media/concert.mkv".into();
+        for (stage, expected) in [
+            ("resolving", "Reading the file…"),
+            ("processing_audio", "Converting audio…"),
+            ("processing_video", "Encoding video (up to 480p)…"),
+            ("processing", "Preparing audio and artwork…"),
+        ] {
+            job.stage = stage.into();
+            assert_eq!(imports::import_outcomes(&job), [expected]);
+        }
+        job.url = "https://www.youtube.com/watch?v=lO3lG-qXU14".into();
+        job.stage = "resolving".into();
+        assert_eq!(
+            imports::import_outcomes(&job),
+            ["Looking up the YouTube source…"]
+        );
     }
 
     #[test]
