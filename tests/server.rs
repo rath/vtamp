@@ -149,6 +149,48 @@ fn concurrent_start_watch_and_restore() {
     assert_eq!(state["status"], "stopped");
 }
 
+/// The server outlives the command that starts it. A descriptor that command
+/// inherited, such as a pipe its caller reads, must not stay open in the
+/// server, or the reader waits for as long as the server runs.
+#[test]
+fn started_server_does_not_keep_descriptors_its_launcher_inherited() {
+    use std::os::{fd::AsRawFd, unix::process::CommandExt};
+    let server = Server::new();
+    let (mut reader, writer) = std::io::pipe().unwrap();
+    let inherited = writer.as_raw_fd();
+    let mut start = Command::new(env!("CARGO_BIN_EXE_vtamp"));
+    start
+        .env("VTAMP_MEDIA_KEYS", "0")
+        .env("VTAMP_HOME", server.home.path())
+        .args(["server", "start", "--headless", "--json"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // Only this launcher inherits the write end, the way a shell or script
+    // passes an extra descriptor down; other tests' children never see it.
+    unsafe {
+        start.pre_exec(move || {
+            if libc::fcntl(inherited, libc::F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    assert!(start.status().unwrap().success());
+    drop(writer);
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rest = Vec::new();
+        let _ = done.send(reader.read_to_end(&mut rest).map(|_| rest));
+    });
+    let rest = finished
+        .recv_timeout(Duration::from_secs(10))
+        .expect("The running server still holds its launcher's descriptor")
+        .unwrap();
+    assert!(rest.is_empty());
+    // The pipe closed because nothing holds it, not because the server left.
+    assert_eq!(server.ok(&["status"])["status"], "stopped");
+}
+
 #[test]
 fn idle_session_does_not_write_periodic_checkpoints_but_commands_still_persist() {
     let server = Server::new();

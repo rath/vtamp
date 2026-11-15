@@ -219,13 +219,21 @@ impl Client {
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log));
+        // Read before forking: afterwards only async-signal-safe calls are allowed.
+        let descriptors = descriptor_limit();
         // setsid is async-signal-safe and disconnects the child from the launching terminal.
         unsafe {
-            command.pre_exec(|| {
+            command.pre_exec(move || {
                 if libc::setsid() == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
                 libc::umask(0o077);
+                // The server outlives its launcher. A descriptor the launcher
+                // inherited, such as a pipe someone reads its output through,
+                // would otherwise stay open until the server stops.
+                for descriptor in 3..descriptors {
+                    libc::fcntl(descriptor, libc::F_SETFD, libc::FD_CLOEXEC);
+                }
                 Ok(())
             });
         }
@@ -247,4 +255,19 @@ impl Client {
             self.paths.log().display()
         )
     }
+}
+
+/// One past the highest descriptor this process can have open, bounded so
+/// an unlimited soft limit does not turn into millions of system calls.
+fn descriptor_limit() -> libc::c_int {
+    const BOUND: libc::rlim_t = 65_536;
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit` is a valid, writable rlimit for the duration of the call.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return BOUND as libc::c_int;
+    }
+    limit.rlim_cur.min(BOUND) as libc::c_int
 }

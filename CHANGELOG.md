@@ -21,6 +21,13 @@ Video files on the server's machine can be imported with their picture.
 - The Track `source` is tagged by provider, with `local` next to `youtube`.
 - `library delete` and the archive commands accept both kinds of managed import.
 
+### Fixed
+
+- A server started in the background no longer keeps the extra descriptors its
+  starting command inherited, such as a pipe held open by a calling script.
+  Such a pipe used to stay open until the server stopped, so its reader waited;
+  concurrent `server start` commands in the test suite could hang this way.
+
 ### Upgrade notes
 
 - The protocol version is 15. Stop an older server with its own binary, start
