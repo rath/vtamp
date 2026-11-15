@@ -2,7 +2,7 @@
 name = "vtamp"
 version = "0.5.3"
 authors = ["Jang-Ho Hwang <rath@xrath.com>"]
-homepage = "https://github.com/rath/vtamp"
+homepage = "https://vtamp.told.me/"
 repository = "https://github.com/rath/vtamp"
 edition = "2024"
 rust-version = "1.90"
