@@ -367,10 +367,10 @@ impl Analyzer {
         }
         self.key = key;
         self.sequence = Some(samples.sequence);
-        for i in 0..BLOCK_SIZE {
-            for ch in 0..2 {
-                self.pcm[ch][self.cursor] = samples.pcm[ch][i];
-            }
+        let [left, right] = &samples.pcm;
+        for (left, right) in left.iter().zip(right) {
+            self.pcm[0][self.cursor] = *left;
+            self.pcm[1][self.cursor] = *right;
             self.cursor = (self.cursor + 1) % FFT_SIZE;
         }
         self.filled = (self.filled + BLOCK_SIZE).min(FFT_SIZE);
