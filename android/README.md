@@ -168,8 +168,10 @@ submit imports or commands to a personal server. CI configures API 29 and API 36
 emulator runs. SDK setup explicitly selects `platform-tools` to avoid the retired
 `tools` package; the pinned platform, build tools, NDK and CMake are installed
 in the following step. An unexecuted CI job is not local validation.
-Video tests wait for readable decoded pixels before capturing a surface and
+Video tests find the attached, visible player view without requiring window
+focus. They wait for readable decoded pixels before capturing a surface and
 sample both playback clocks on the main thread when checking synchronization.
+Fullscreen tests check that frames and audio advance after the view is in place.
 The synchronization tolerance stays at 250 ms, including on slower CI emulators.
 
 `src/androidTest/assets/resume-h264.mkv` is a synthetic MIT-licensed test pattern,

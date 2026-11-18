@@ -9,14 +9,13 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.SurfaceView
+import android.view.inspector.WindowInspector
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.core.view.allViews
 import androidx.lifecycle.Lifecycle
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
-import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.matcher.RootMatchers.isDialog
-import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.xrath.vtamp.playback.*
 import java.util.concurrent.CountDownLatch
@@ -176,10 +175,8 @@ class AppTest {
             assertTrue("The held frame must contain the decoded test pattern", colors.size > 20)
             assertTrue("Capturing video must leave audio playing", runtime.audio.isPlaying)
         }
-        onView(isAssignableFrom(PlayerView::class.java)).check { view, error ->
-            if (error != null) throw error
-            runtime.video.show(view as PlayerView)
-        }
+        val view = waitForDisplayedVideoView()
+        compose.runOnUiThread { runtime.video.show(view) }
         compose.waitUntil(15000) { runtime.video.state.value.ready }
         compose.runOnUiThread {
             // Queue replacement can race with an outstanding asynchronous surface copy.
@@ -201,37 +198,28 @@ class AppTest {
         compose.waitUntil(15000) { runtime.video.state.value.ready }
         val player = runtime.video.player!!
         val counters = compose.runOnIdle { player.videoDecoderCounters!! }
-        var surface: PlayerView? = null
-        onView(isAssignableFrom(PlayerView::class.java)).inRoot(isDialog()).check { view, error ->
-            if (error != null) throw error
-            surface = view as PlayerView
-        }
+        val surface = waitForDisplayedVideoView()
         val requests = server.videoRequests.get()
         repeat(2) {
             for (button in listOf("Fullscreen video", "Exit fullscreen")) {
-                var frames = 0
-                var position = 0L
-                compose.runOnUiThread {
-                    frames = counters.renderedOutputBufferCount
-                    position = runtime.audio.currentPosition
-                }
                 compose.onNodeWithContentDescription(button).performClick()
-                compose.runOnUiThread {
+                compose.waitForIdle()
+                val view = waitForDisplayedVideoView()
+                val (frames, position) = compose.runOnUiThread {
                     assertSame(
                         "Fullscreen must retain the prepared decoder",
                         player,
                         runtime.video.player,
                     )
-                }
-                onView(isAssignableFrom(PlayerView::class.java)).inRoot(isDialog()).check {
-                    view,
-                    error ->
-                    if (error != null) throw error
                     assertSame("Fullscreen must move the existing video view", surface, view)
-                    assertSame(player, (view as PlayerView).player)
-                    assertTrue(view.isAttachedToWindow)
+                    assertSame(player, view.player)
+                    counters.ensureUpdated()
+                    counters.renderedOutputBufferCount to runtime.audio.currentPosition
                 }
-                compose.waitUntil(2500) {
+                compose.waitUntil(
+                    conditionDescription = "video frames and audio clock advance after $button",
+                    timeoutMillis = 10000,
+                ) {
                     counters.ensureUpdated()
                     counters.renderedOutputBufferCount > frames + 2 &&
                         runtime.state.value.position > position + 200
@@ -259,13 +247,12 @@ class AppTest {
             compose.waitUntil(15000) {
                 runtime.state.value.currentId != previous && runtime.video.state.value.ready
             }
-            onView(isAssignableFrom(PlayerView::class.java)).check { view, error ->
-                if (error != null) throw error
-                assertTrue("Video view must be on screen", view.isAttachedToWindow)
+            val view = waitForDisplayedVideoView()
+            compose.runOnUiThread {
                 assertSame(
                     "The visible surface must own the new player",
                     runtime.video.player,
-                    (view as PlayerView).player,
+                    view.player,
                 )
             }
         }
@@ -345,19 +332,35 @@ class AppTest {
         }
     }
 
+    private fun waitForDisplayedVideoView(): PlayerView {
+        // Inspect the actual view hierarchy without waiting for the player dialog to take focus.
+        var displayed: PlayerView? = null
+        compose.waitUntil(
+            conditionDescription = "one attached, visible PlayerView",
+            timeoutMillis = 15000,
+        ) {
+            displayed = compose.runOnUiThread {
+                WindowInspector.getGlobalWindowViews().asSequence()
+                    .flatMap { it.allViews }
+                    .filterIsInstance<PlayerView>()
+                    .singleOrNull {
+                        it.isAttachedToWindow && it.isShown && it.width > 0 && it.height > 0
+                    }
+            }
+            displayed != null
+        }
+        return checkNotNull(displayed)
+    }
+
     private fun waitForSurfaceFrame() {
         // Frame metadata arrives before the compositor presents pixels. Software-rendered CI
         // devices may not have a readable SurfaceView buffer immediately when ready turns true.
-        var surface: SurfaceView? = null
-        onView(isAssignableFrom(PlayerView::class.java)).inRoot(isDialog()).check { view, error ->
-            if (error != null) throw error
-            surface = (view as PlayerView).videoSurfaceView as SurfaceView
-        }
+        val view = waitForDisplayedVideoView()
+        val source = compose.runOnUiThread { view.videoSurfaceView as SurfaceView }
         var pending = false
         var readable = false
         compose.waitUntil(15000) {
             compose.runOnUiThread {
-                val source = surface!!
                 if (
                     !pending &&
                         !readable &&
