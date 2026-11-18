@@ -1,0 +1,197 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <title>vtamp application icon</title>
+  <desc>A lime play triangle rendered in a nine-by-nine terminal cell grid on a charcoal squircle.</desc>
+  <defs>
+    <linearGradient id="tile-fill" x1="0" y1="62.5" x2="0" y2="961.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#161c17" />
+      <stop offset=".44" stop-color="#101610" />
+      <stop offset="1" stop-color="#0e1312" />
+    </linearGradient>
+    <linearGradient id="tile-edge" x1="0" y1="62.5" x2="0" y2="961.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5a6548" />
+      <stop offset=".46" stop-color="#46513f" stop-opacity=".72" />
+      <stop offset="1" stop-color="#46513f" stop-opacity=".48" />
+    </linearGradient>
+    <linearGradient id="glass-sheen" x1="0" y1="63" x2="0" y2="307" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c9d3c6" stop-opacity=".066" />
+      <stop offset="1" stop-color="#c9d3c6" stop-opacity=".017" />
+    </linearGradient>
+    <linearGradient id="phosphor-fill" x1="250" y1="0" x2="578" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b4f676" />
+      <stop offset="1" stop-color="#b4f676" stop-opacity=".76" />
+    </linearGradient>
+    <radialGradient id="phosphor-glow">
+      <stop offset="0" stop-color="#b4f676" stop-opacity=".26" />
+      <stop offset=".54" stop-color="#b4f676" stop-opacity=".16" />
+      <stop offset=".74" stop-color="#b4f676" stop-opacity=".054" />
+      <stop offset="1" stop-color="#b4f676" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <g id="tile">
+    <path d="M319 62.5H705C795 62.5 849 74.5 896 121.5C942 167.5 961.5 226 961.5 319V705C961.5 798 942 856.5 896 902.5C849 949.5 795 961.5 705 961.5H319C229 961.5 175 949.5 128 902.5C82 856.5 62.5 798 62.5 705V319C62.5 226 82 167.5 128 121.5C175 74.5 229 62.5 319 62.5Z" fill="url(#tile-fill)" stroke="url(#tile-edge)" stroke-width="2" />
+    <path d="M319 64H705C795 64 848 76 895 122.5C925 152.5 943 188 952 232C836 281 686 300 512 300C338 300 188 281 72 232C81 188 99 152.5 129 122.5C176 76 229 64 319 64Z" fill="url(#glass-sheen)" />
+  </g>
+
+  <g id="cell-glow" fill="url(#phosphor-glow)">
+    <circle cx="250" cy="250" r="49" />
+    <circle cx="250" cy="315.5" r="49" />
+    <circle cx="315.5" cy="315.5" r="49" />
+    <circle cx="250" cy="381" r="49" />
+    <circle cx="315.5" cy="381" r="49" />
+    <circle cx="381" cy="381" r="49" />
+    <circle cx="250" cy="446.5" r="49" />
+    <circle cx="315.5" cy="446.5" r="49" />
+    <circle cx="381" cy="446.5" r="49" />
+    <circle cx="446.5" cy="446.5" r="49" />
+    <circle cx="250" cy="512" r="49" />
+    <circle cx="315.5" cy="512" r="49" />
+    <circle cx="381" cy="512" r="49" />
+    <circle cx="446.5" cy="512" r="49" />
+    <circle cx="512" cy="512" r="49" />
+    <circle cx="250" cy="577.5" r="49" />
+    <circle cx="315.5" cy="577.5" r="49" />
+    <circle cx="381" cy="577.5" r="49" />
+    <circle cx="446.5" cy="577.5" r="49" />
+    <circle cx="250" cy="643" r="49" />
+    <circle cx="315.5" cy="643" r="49" />
+    <circle cx="381" cy="643" r="49" />
+    <circle cx="250" cy="708.5" r="49" />
+    <circle cx="315.5" cy="708.5" r="49" />
+    <circle cx="250" cy="774" r="49" />
+  </g>
+
+  <g id="terminal-grid">
+    <g id="row-1">
+      <rect x="224" y="224" width="52" height="52" rx="12" fill="url(#phosphor-fill)" />
+      <rect x="289.5" y="224" width="52" height="52" rx="12" fill="url(#phosphor-fill)" opacity=".5" />
+      <g fill="#46513f" opacity=".26">
+        <rect x="355" y="224" width="52" height="52" rx="12" />
+        <rect x="420.5" y="224" width="52" height="52" rx="12" />
+        <rect x="486" y="224" width="52" height="52" rx="12" />
+        <rect x="551.5" y="224" width="52" height="52" rx="12" />
+        <rect x="617" y="224" width="52" height="52" rx="12" />
+        <rect x="682.5" y="224" width="52" height="52" rx="12" />
+        <rect x="748" y="224" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-2">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="289.5" width="52" height="52" rx="12" />
+        <rect x="289.5" y="289.5" width="52" height="52" rx="12" />
+        <rect x="355" y="289.5" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="420.5" y="289.5" width="52" height="52" rx="12" />
+        <rect x="486" y="289.5" width="52" height="52" rx="12" />
+        <rect x="551.5" y="289.5" width="52" height="52" rx="12" />
+        <rect x="617" y="289.5" width="52" height="52" rx="12" />
+        <rect x="682.5" y="289.5" width="52" height="52" rx="12" />
+        <rect x="748" y="289.5" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-3">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="355" width="52" height="52" rx="12" />
+        <rect x="289.5" y="355" width="52" height="52" rx="12" />
+        <rect x="355" y="355" width="52" height="52" rx="12" />
+        <rect x="420.5" y="355" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="486" y="355" width="52" height="52" rx="12" />
+        <rect x="551.5" y="355" width="52" height="52" rx="12" />
+        <rect x="617" y="355" width="52" height="52" rx="12" />
+        <rect x="682.5" y="355" width="52" height="52" rx="12" />
+        <rect x="748" y="355" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-4">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="420.5" width="52" height="52" rx="12" />
+        <rect x="289.5" y="420.5" width="52" height="52" rx="12" />
+        <rect x="355" y="420.5" width="52" height="52" rx="12" />
+        <rect x="420.5" y="420.5" width="52" height="52" rx="12" />
+        <rect x="486" y="420.5" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="551.5" y="420.5" width="52" height="52" rx="12" />
+        <rect x="617" y="420.5" width="52" height="52" rx="12" />
+        <rect x="682.5" y="420.5" width="52" height="52" rx="12" />
+        <rect x="748" y="420.5" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-5">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="486" width="52" height="52" rx="12" />
+        <rect x="289.5" y="486" width="52" height="52" rx="12" />
+        <rect x="355" y="486" width="52" height="52" rx="12" />
+        <rect x="420.5" y="486" width="52" height="52" rx="12" />
+        <rect x="486" y="486" width="52" height="52" rx="12" />
+        <rect x="551.5" y="486" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="617" y="486" width="52" height="52" rx="12" />
+        <rect x="682.5" y="486" width="52" height="52" rx="12" />
+        <rect x="748" y="486" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-6">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="551.5" width="52" height="52" rx="12" />
+        <rect x="289.5" y="551.5" width="52" height="52" rx="12" />
+        <rect x="355" y="551.5" width="52" height="52" rx="12" />
+        <rect x="420.5" y="551.5" width="52" height="52" rx="12" />
+        <rect x="486" y="551.5" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="551.5" y="551.5" width="52" height="52" rx="12" />
+        <rect x="617" y="551.5" width="52" height="52" rx="12" />
+        <rect x="682.5" y="551.5" width="52" height="52" rx="12" />
+        <rect x="748" y="551.5" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-7">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="617" width="52" height="52" rx="12" />
+        <rect x="289.5" y="617" width="52" height="52" rx="12" />
+        <rect x="355" y="617" width="52" height="52" rx="12" />
+        <rect x="420.5" y="617" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="486" y="617" width="52" height="52" rx="12" />
+        <rect x="551.5" y="617" width="52" height="52" rx="12" />
+        <rect x="617" y="617" width="52" height="52" rx="12" />
+        <rect x="682.5" y="617" width="52" height="52" rx="12" />
+        <rect x="748" y="617" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-8">
+      <g fill="url(#phosphor-fill)">
+        <rect x="224" y="682.5" width="52" height="52" rx="12" />
+        <rect x="289.5" y="682.5" width="52" height="52" rx="12" />
+        <rect x="355" y="682.5" width="52" height="52" rx="12" opacity=".5" />
+      </g>
+      <g fill="#46513f" opacity=".26">
+        <rect x="420.5" y="682.5" width="52" height="52" rx="12" />
+        <rect x="486" y="682.5" width="52" height="52" rx="12" />
+        <rect x="551.5" y="682.5" width="52" height="52" rx="12" />
+        <rect x="617" y="682.5" width="52" height="52" rx="12" />
+        <rect x="682.5" y="682.5" width="52" height="52" rx="12" />
+        <rect x="748" y="682.5" width="52" height="52" rx="12" />
+      </g>
+    </g>
+    <g id="row-9">
+      <rect x="224" y="748" width="52" height="52" rx="12" fill="url(#phosphor-fill)" />
+      <rect x="289.5" y="748" width="52" height="52" rx="12" fill="url(#phosphor-fill)" opacity=".5" />
+      <g fill="#46513f" opacity=".26">
+        <rect x="355" y="748" width="52" height="52" rx="12" />
+        <rect x="420.5" y="748" width="52" height="52" rx="12" />
+        <rect x="486" y="748" width="52" height="52" rx="12" />
+        <rect x="551.5" y="748" width="52" height="52" rx="12" />
+        <rect x="617" y="748" width="52" height="52" rx="12" />
+        <rect x="682.5" y="748" width="52" height="52" rx="12" />
+        <rect x="748" y="748" width="52" height="52" rx="12" />
+      </g>
+    </g>
+  </g>
+</svg>

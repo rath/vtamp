@@ -227,9 +227,9 @@ mutes playback so the simulator does not play through the Mac.
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 | `screenshots` | The app screenshots shown in the main README |
 
-The app icon sets the five V-meter bars on dark gray with margins, without
-the macOS icon's tile. `scripts/build-icons.py` draws it from bar edges traced
-from `assets/icon.png`; change it there and rerun the script.
+The app icon sets the icon's 9 × 9 cell grid on dark gray with margins, without
+the macOS icon's tile. `scripts/build-icons.py` draws it from `assets/icon.svg`;
+change the drawing there and rerun the script.
 The app's version (`MARKETING_VERSION` in `project.yml`) is independent of the
 crate's release version; the protocol version in `VtampClient` must match the
 server's.

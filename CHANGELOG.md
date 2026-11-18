@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The icon is a play triangle drawn as a 9 × 9 grid of terminal cells. It replaces
+  the V-meter on macOS, the website, and in the iPhone and Android apps.
+
 ## [0.5.4] — 2026-11-15
 
 Video files on the server's machine can be imported into the Library with their

@@ -13,7 +13,7 @@ depend on the macOS surface; Control Center does not always show a timeline.
 No separate app installation, Dock icon, keyboard monitoring, or Accessibility
 permission is needed by vtamp.
 
-The V-meter application icon matches the website. On first media-enabled server
+The application icon matches the website. On first media-enabled server
 startup, vtamp prepares a private app bundle under its data directory's
 `macos/` folder, registers it with Launch Services, and runs the server from it.
 The bundle is signed locally with `codesign --sign -` (ad-hoc signing): no Apple

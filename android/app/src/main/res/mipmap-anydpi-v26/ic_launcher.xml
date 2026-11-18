@@ -1,5 +1,5 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/icon_background" />
-    <foreground android:drawable="@drawable/ic_meter" />
-    <monochrome android:drawable="@drawable/ic_meter" />
+    <foreground android:drawable="@drawable/ic_mosaic" />
+    <monochrome android:drawable="@drawable/ic_mosaic" />
 </adaptive-icon>

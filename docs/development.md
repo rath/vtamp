@@ -81,12 +81,17 @@ identity in the executable, including binaries installed with Cargo.
 the server, before AppKit starts. If preparation fails, the server logs a warning
 and continues with ordinary playback and the available media controls.
 
-The approved icon source is `assets/icon.png`; its generation prompt is in
-`assets/icon-prompt.txt`. Run `python3 scripts/build-icons.py` on macOS to regenerate
-the web PNG sizes and `assets/vtamp.icns`. The same script draws the iPhone app
-icon as SVG and renders it with `sips` (checked on macOS 26, whose `sips` draws
-SVG blur filters). These generated assets are committed; building or installing
-vtamp does not require image-generation tools.
+The approved icon source is the vector drawing `assets/icon.svg`. It was generated
+as SVG from the prompt in `assets/icon-prompt.txt`; the tile shades, the tile edge,
+the opacity of unlit cells, and the glow were then adjusted by hand to match the
+approved draft. Run `python3 scripts/build-icons.py` on macOS to regenerate
+everything derived from it: the 1024-pixel render `assets/icon.png`, the web PNG
+sizes, `assets/vtamp.icns`, the iPhone app icon, and the Android launcher drawable.
+The script renders SVG with `sips` (checked on macOS 27) and reads the grid cells
+from the `terminal-grid` group, so keep that group and the `tile` group when
+editing the drawing. These generated assets are committed; building or installing
+vtamp does not require image-generation tools. The social preview cards embed
+`site/mark.png`, so run `python3 scripts/build-og.py` after an icon change.
 For a visual icon check, use a private `VTAMP_HOME` on the normal filesystem
 (for example a short directory under `target/`): Launch Services may leave
 bundles under `/tmp` with a generic icon even when registration succeeds.

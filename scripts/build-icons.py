@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Derive web and macOS icons from the approved V-meter artwork and draw the iPhone icon (macOS tools)."""
+"""Derive the macOS, web, iPhone, and Android icons from the approved cell-mosaic artwork (macOS tools)."""
 from pathlib import Path
-import math
+import copy
 import struct
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets" / "icon.png"
+SOURCE = ROOT / "assets" / "icon.svg"
+RASTER = ROOT / "assets" / "icon.png"
+SVG = "http://www.w3.org/2000/svg"
+ET.register_namespace("", SVG)
 
 
 def preserve_prompt(destination):
@@ -22,75 +26,62 @@ def preserve_prompt(destination):
     destination.write_bytes(data[:-12] + encoded + data[-12:])
 
 
+def render(drawing, destination):
+    # sips renders SVG at the drawing's own 1024 size.
+    subprocess.run(["sips", "-s", "format", "png", str(drawing), "--out", str(destination)],
+                   check=True, capture_output=True)
+
+
 def resize(size, destination):
-    subprocess.run(["sips", "-z", str(size), str(size), str(SOURCE),
+    subprocess.run(["sips", "-z", str(size), str(size), str(RASTER),
                     "--out", str(destination)], check=True, capture_output=True)
 
 
-# The iPhone icon redraws the V-meter for the home screen: the five lit bars on
-# a flat dark ground with margins. Each bar's left edge, right edge, and top are
-# traced from the approved artwork in a 1024 frame; one 45-degree V cuts every bar.
-IOS_BARS = [(91, 240, 127), (262, 412, 330), (440, 584, 465), (613, 763, 330), (785, 935, 127)]
-IOS_AXIS = 513  # the V's vertical axis in the traced frame
-IOS_CUT = 430  # bar bottoms: y = x + IOS_CUT left of the axis, mirrored right
-IOS_SCALE = 0.707  # the traced frame shrinks around IOS_ORIGIN,
-IOS_ORIGIN = (513, 526)  # which lands on the icon's centre
+def group(root, name):
+    return next(node for node in root.iter(f"{{{SVG}}}g") if node.get("id") == name)
+
+
+def cells(root):
+    """Every grid cell as (x, y, size, radius, level): 1 lit, 0.5 half lit, 0 unlit."""
+    found = []
+
+    def walk(node, fill):
+        fill = node.get("fill", fill)
+        if node.tag != f"{{{SVG}}}rect":
+            for child in node:
+                walk(child, fill)
+            return
+        assert node.get("width") == node.get("height"), "grid cells are square"
+        level = float(node.get("opacity", "1")) if fill == "url(#phosphor-fill)" else 0.0
+        found.append((float(node.get("x")), float(node.get("y")), float(node.get("width")),
+                      float(node.get("rx")), level))
+
+    walk(group(root, "terminal-grid"), None)
+    assert len(found) == 81, "expected the 9 x 9 grid"
+    return found
+
+
+# The iPhone icon is the grid without the tile: iOS masks the icon itself, so the
+# cells sit on a flat dark ground that fills the square. The ground is lighter
+# than the tile, so unlit cells need more opacity to stay just visible.
 IOS_GROUND = (40, 40, 40)
+IOS_UNLIT_OPACITY = "0.5"
 
 
-def ios_bar(index):
-    """Bar `index` as a clockwise polygon, cut by the V."""
-    left, right, top = IOS_BARS[index]
-
-    def bottom(x):
-        return IOS_CUT + min(x, 2 * IOS_AXIS - x)
-
-    corners = [(left, top), (right, top), (right, bottom(right))]
-    if left < IOS_AXIS < right:
-        corners.append((IOS_AXIS, bottom(IOS_AXIS)))
-    return corners + [(left, bottom(left))]
-
-
-def placed(points):
-    ox, oy = IOS_ORIGIN
-    return [(512 + (x - ox) * IOS_SCALE, 512 + (y - oy) * IOS_SCALE) for x, y in points]
-
-
-def rounded(points, radius, paint, attributes=""):
-    """A convex clockwise polygon as one path whose corners are arcs of `radius`."""
-    points = placed(points)
-    path = []
-    for index, (px, py) in enumerate(points):
-        (ax, ay), (bx, by) = points[index - 1], points[(index + 1) % len(points)]
-        ua, ub = math.hypot(ax - px, ay - py), math.hypot(bx - px, by - py)
-        cosine = ((ax - px) * (bx - px) + (ay - py) * (by - py)) / (ua * ub)
-        reach = radius / math.tan(math.acos(cosine) / 2)
-        start = (px + (ax - px) / ua * reach, py + (ay - py) / ua * reach)
-        end = (px + (bx - px) / ub * reach, py + (by - py) / ub * reach)
-        path.append(f"{'M' if index == 0 else 'L'}{start[0]:.2f},{start[1]:.2f}"
-                    f"A{radius},{radius} 0 0 1 {end[0]:.2f},{end[1]:.2f}")
-    return f'<path d="{"".join(path)}Z" fill="{paint}" {attributes}/>'
-
-
-def ios_icon_svg():
-    def blur(name, deviation):
-        return (f'<filter id="{name}" filterUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">'
-                f'<feGaussianBlur stdDeviation="{deviation}"/></filter>')
-
-    defs = (
-        '<linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0" stop-color="#2c2c2c"/><stop offset="1" stop-color="#242424"/></linearGradient>'
-        '<linearGradient id="phosphor" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0" stop-color="#ecffb0"/><stop offset="0.4" stop-color="#c2f77f"/>'
-        '<stop offset="1" stop-color="#7fbf4a"/></linearGradient>'
-        + blur("halo", 40) + blur("glow", 10))
-    bars = [ios_bar(index) for index in range(len(IOS_BARS))]
-    body = (['<rect width="1024" height="1024" fill="url(#ground)"/>']
-            + [rounded(bar, 10, "#b4f676", 'filter="url(#halo)" opacity="0.22"') for bar in bars]
-            + [rounded(bar, 10, "#b4f676", 'filter="url(#glow)" opacity="0.7"') for bar in bars]
-            + [rounded(bar, 10, "url(#phosphor)") for bar in bars])
-    return ('<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
-            f'<defs>{defs}</defs>{"".join(body)}</svg>')
+def ios_icon_svg(root):
+    root = copy.deepcopy(root)
+    tile = group(root, "tile")
+    for node in list(tile):
+        tile.remove(node)
+    ground = ET.SubElement(root.find(f"{{{SVG}}}defs"), f"{{{SVG}}}linearGradient",
+                           {"id": "ground", "x1": "0", "y1": "0", "x2": "0", "y2": "1"})
+    ET.SubElement(ground, f"{{{SVG}}}stop", {"offset": "0", "stop-color": "#2c2c2c"})
+    ET.SubElement(ground, f"{{{SVG}}}stop", {"offset": "1", "stop-color": "#242424"})
+    ET.SubElement(tile, f"{{{SVG}}}rect", {"width": "1024", "height": "1024", "fill": "url(#ground)"})
+    for node in group(root, "terminal-grid").iter(f"{{{SVG}}}g"):
+        if node.get("fill") == "#46513f":
+            node.set("opacity", IOS_UNLIT_OPACITY)
+    return ET.tostring(root, encoding="unicode")
 
 
 def png_rows(data):
@@ -142,17 +133,49 @@ def flatten(destination, fill):
                             + chunk(b"IEND", b""))
 
 
-def ios_icon(destination):
-    # sips renders SVG, filters included, at the drawing's own 1024 size.
+def ios_icon(root, destination):
     with tempfile.TemporaryDirectory(prefix="vtamp-ios-icon-") as directory:
         drawing = Path(directory) / "icon.svg"
-        drawing.write_text(ios_icon_svg())
-        subprocess.run(["sips", "-s", "format", "png", str(drawing), "--out", str(destination)],
-                       check=True, capture_output=True)
+        drawing.write_text(ios_icon_svg(root))
+        render(drawing, destination)
     flatten(destination, IOS_GROUND)
 
 
+# The Android launcher foreground is the grid alone in the 108 dp adaptive-icon
+# viewport, scaled so its corners stay inside the 66 dp safe circle. One lime
+# drawable serves the colour and the monochrome layer: cell levels become alpha.
+ANDROID_SCALE = 0.08
+ANDROID_ALPHA = {1.0: "1", 0.5: "0.5", 0.0: "0.1"}
+
+
+def android_icon(root, destination):
+    def cell(x, y, size, radius):
+        x, y = 54 + (x - 512) * ANDROID_SCALE, 54 + (y - 512) * ANDROID_SCALE
+        size, r = size * ANDROID_SCALE, radius * ANDROID_SCALE
+        side = size - 2 * r
+        return (f"M{x + r:.2f},{y:.2f}h{side:.2f}a{r:.2f},{r:.2f} 0 0 1 {r:.2f},{r:.2f}"
+                f"v{side:.2f}a{r:.2f},{r:.2f} 0 0 1 -{r:.2f},{r:.2f}"
+                f"h-{side:.2f}a{r:.2f},{r:.2f} 0 0 1 -{r:.2f},-{r:.2f}"
+                f"v-{side:.2f}a{r:.2f},{r:.2f} 0 0 1 {r:.2f},-{r:.2f}Z")
+
+    grid = cells(root)
+    assert {level for *_, level in grid} == set(ANDROID_ALPHA), "expected lit, half-lit, and unlit cells"
+    paths = "".join(
+        f'    <path android:fillColor="#B4F676" android:fillAlpha="{alpha}" android:pathData="'
+        + " ".join(cell(x, y, size, radius) for x, y, size, radius, found in grid if found == level)
+        + '" />\n'
+        for level, alpha in ANDROID_ALPHA.items())
+    destination.write_text(
+        "<!-- Generated by scripts/build-icons.py from assets/icon.svg. -->\n"
+        '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp"'
+        ' android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n'
+        f"{paths}</vector>\n")
+
+
 def main():
+    root = ET.parse(SOURCE).getroot()
+    render(SOURCE, RASTER)
+    preserve_prompt(RASTER)
     for size, name in [(32, "favicon-32.png"), (64, "favicon-64.png"),
                        (128, "mark.png"), (180, "apple-touch-icon.png")]:
         destination = ROOT / "site" / name
@@ -166,8 +189,9 @@ def main():
             resize(size * 2, iconset / f"icon_{size}x{size}@2x.png")
         subprocess.run(["iconutil", "-c", "icns", str(iconset),
                         "-o", str(ROOT / "assets" / "vtamp.icns")], check=True)
-    ios_icon(ROOT / "ios" / "Sources" / "App" / "Assets.xcassets" / "AppIcon.appiconset" / "icon-1024.png")
-    print("Updated web icons, assets/vtamp.icns, and the iOS app icon")
+    ios_icon(root, ROOT / "ios" / "Sources" / "App" / "Assets.xcassets" / "AppIcon.appiconset" / "icon-1024.png")
+    android_icon(root, ROOT / "android" / "app" / "src" / "main" / "res" / "drawable" / "ic_mosaic.xml")
+    print("Updated assets/icon.png, web icons, assets/vtamp.icns, and the iOS and Android app icons")
 
 
 if __name__ == "__main__":
