@@ -62,8 +62,11 @@ follow Tab's behavior when returning from the spectrum, and do not switch panels
 inside prompts or overlays. Any other intervening key cancels the prefix.
 
 Library movement keys (`j`/`k`, arrows, PageUp/PageDown, and Ctrl-B/F) move
-through the full set of matching tracks and load the destination page when
-crossing a page boundary. `[` and `]` select the first track of a Library page.
+through one continuous list of matching tracks. Keep a bounded window of
+neighboring tracks and fetch ahead near its edges. Preserve the visible rows
+and their screen positions when replacing that window. During a slow fetch,
+keep the current list visible and accumulate movement toward the requested
+row. `[` and `]` jump to the first track of the previous or next 200-track group.
 
 Library Ctrl+Enter plays outside the queue; Enter retains its existing queue
 behavior. Mark direct playback with `NO QUEUE` in the Now Playing border and keep

@@ -47,6 +47,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 const PAGE_SIZE: usize = 200;
+/// Keep neighboring rows available while the selection scrolls through the catalog.
+const LIBRARY_WINDOW: usize = PAGE_SIZE * 3;
+const LIBRARY_PREFETCH_MARGIN: usize = 50;
 /// Library tracks per request while queueing a whole view; the server caps a
 /// page at 1000.
 const BULK_PAGE: usize = 1000;
@@ -486,6 +489,8 @@ struct App {
     pending_z: bool,
     pending_ctrl_w: bool,
     library_jump: Option<ListTarget>,
+    /// Start of the requested window while the previous rows remain on screen.
+    library_request: Option<usize>,
     input: Option<Input>,
     /// Filters applied before a search prompt opened; Esc restores them.
     search_restore: Option<SearchRestore>,
@@ -641,6 +646,7 @@ pub async fn run(
         pending_z: false,
         pending_ctrl_w: false,
         library_jump: None,
+        library_request: None,
         input: None,
         search_restore: None,
         search_pending: None,
@@ -1362,6 +1368,7 @@ impl App {
         self.library_query = query;
         self.offset = 0;
         self.library_jump = None;
+        self.tracks.clear();
         self.library_selection.select(Some(0));
         self.refresh(commands);
     }
@@ -1423,6 +1430,7 @@ impl App {
             self.library_query = restore.library;
             self.offset = restore.offset;
             self.library_jump = None;
+            self.tracks.clear();
             self.refresh(commands);
         }
     }
@@ -1695,16 +1703,45 @@ impl App {
         *self.queue_selection.offset_mut() = offset;
     }
     fn refresh(&mut self, commands: &mpsc::Sender<Command>) {
-        self.send(
-            commands,
-            Command::LibraryList {
+        self.request_library(self.offset, commands);
+    }
+    fn request_library(&mut self, offset: usize, commands: &mpsc::Sender<Command>) -> bool {
+        if !self.connected {
+            self.notice("Disconnected. Commands are not queued for replay.");
+            return false;
+        }
+        if commands
+            .try_send(Command::LibraryList {
                 query: self.library_query.clone(),
-                offset: self.offset,
-                limit: PAGE_SIZE,
+                offset,
+                limit: LIBRARY_WINDOW,
                 anchor: None,
                 kind: self.library_kind,
-            },
-        );
+            })
+            .is_err()
+        {
+            self.notice("Too many pending commands; try again shortly.");
+            return false;
+        }
+        self.library_request = Some(offset);
+        true
+    }
+    fn prefetch_library(&mut self, commands: &mpsc::Sender<Command>) {
+        if !self.connected || self.library_request.is_some() || self.tracks.is_empty() {
+            return;
+        }
+        let row = self.library_selection.selected().unwrap_or(0);
+        let near_start = self.offset > 0 && row < LIBRARY_PREFETCH_MARGIN;
+        let near_end = self.offset + self.tracks.len() < self.total
+            && row + LIBRARY_PREFETCH_MARGIN >= self.tracks.len();
+        if near_start || near_end {
+            let offset = (self.offset + row).saturating_sub(PAGE_SIZE) / PAGE_SIZE * PAGE_SIZE;
+            if offset != self.offset
+                || self.tracks.len() < LIBRARY_WINDOW.min(self.total.saturating_sub(self.offset))
+            {
+                self.request_library(offset, commands);
+            }
+        }
     }
     /// `f` in Library: all → video → radio → all. The kind is a Library
     /// filter like the `/` query, so it resets the page and Esc clears both.
@@ -1717,6 +1754,7 @@ impl App {
         self.offset = 0;
         self.library_jump = None;
         self.library_reveal = None;
+        self.tracks.clear();
         self.library_selection.select(Some(0));
         self.refresh(commands);
     }
@@ -1886,8 +1924,9 @@ impl App {
             Message::Reply(command, result) => match result {
                 Err(error) => {
                     if matches!(command, Command::LibraryList { ref query, offset, kind, .. }
-                    if *query == self.library_query && offset == self.offset && kind == self.library_kind)
+                    if *query == self.library_query && Some(offset) == self.library_request && kind == self.library_kind)
                     {
+                        self.library_request = None;
                         self.library_jump = None;
                     }
                     if let Command::ImportPreview { request } = &command {
@@ -1973,31 +2012,39 @@ impl App {
                     } = command
                     {
                         if query == self.library_query
-                            && offset == self.offset
+                            && offset == self.library_request.unwrap_or(self.offset)
                             && kind == self.library_kind
                         {
+                            self.library_request = None;
+                            let top = self.offset + self.library_selection.offset();
+                            let selected =
+                                self.offset + self.library_selection.selected().unwrap_or(0);
                             let selected_id = self
                                 .library_selection
                                 .selected()
                                 .and_then(|i| self.tracks.get(i))
                                 .map(|t| t.id.clone());
+                            self.offset = offset;
                             self.tracks =
                                 serde_json::from_value(value["tracks"].clone()).unwrap_or_default();
                             self.total = value["total"].as_u64().unwrap_or(0) as usize;
                             if self.offset > 0 && self.offset >= self.total {
-                                self.offset = self.total.saturating_sub(1) / PAGE_SIZE * PAGE_SIZE;
+                                self.offset =
+                                    self.total.saturating_sub(1).saturating_sub(PAGE_SIZE)
+                                        / PAGE_SIZE
+                                        * PAGE_SIZE;
                                 self.refresh(commands);
                                 return;
                             }
+                            *self.library_selection.offset_mut() = top.saturating_sub(self.offset);
                             if let Some(target) = self.library_jump.take() {
                                 // A scan may have changed the destination while the page was loading.
                                 self.jump_library(target, commands);
                             } else {
-                                if let Some(index) = selected_id
+                                let index = selected_id
                                     .and_then(|id| self.tracks.iter().position(|t| t.id == id))
-                                {
-                                    self.library_selection.select(Some(index));
-                                }
+                                    .unwrap_or_else(|| selected.saturating_sub(self.offset));
+                                self.library_selection.select(Some(index));
                                 clamp_selection(&mut self.library_selection, self.tracks.len());
                             }
                         }
@@ -2370,14 +2417,17 @@ impl App {
                     value: Some(self.state.volume.saturating_sub(5)),
                 },
             ),
-            KeyCode::Char(']')
-                if self.focus == Focus::Library && self.offset + PAGE_SIZE < self.total =>
-            {
-                self.jump_library(ListTarget::Row(self.offset + PAGE_SIZE), commands);
+            KeyCode::Char(']') if self.focus == Focus::Library => {
+                let index = self.offset + self.library_selection.selected().unwrap_or(0);
+                let next = (index / PAGE_SIZE + 1) * PAGE_SIZE;
+                if next < self.total {
+                    self.jump_library(ListTarget::Row(next), commands);
+                }
             }
             KeyCode::Char('[') if self.focus == Focus::Library => {
+                let index = self.offset + self.library_selection.selected().unwrap_or(0);
                 self.jump_library(
-                    ListTarget::Row(self.offset.saturating_sub(PAGE_SIZE)),
+                    ListTarget::Row((index / PAGE_SIZE).saturating_sub(1) * PAGE_SIZE),
                     commands,
                 );
             }
@@ -2385,7 +2435,9 @@ impl App {
                 self.cycle_library_kind(commands)
             }
             KeyCode::Char('A') if self.focus == Focus::Library => self.queue_all_matching(commands),
-            KeyCode::Enter | KeyCode::Char('e') if self.focus == Focus::Library => {
+            KeyCode::Enter | KeyCode::Char('e')
+                if self.focus == Focus::Library && self.library_jump.is_none() =>
+            {
                 if let Some(track) = self
                     .library_selection
                     .selected()
@@ -2501,36 +2553,29 @@ impl App {
         self.jump_library(target, commands);
     }
     fn jump_library(&mut self, target: ListTarget, commands: &mpsc::Sender<Command>) {
-        let index = target.index(self.total).unwrap_or(0);
-        let offset = index / PAGE_SIZE * PAGE_SIZE;
-        if offset != self.offset {
-            if !self.connected {
-                self.notice("Disconnected. Commands are not queued for replay.");
-                return;
-            }
-            if commands
-                .try_send(Command::LibraryList {
-                    query: self.library_query.clone(),
-                    offset,
-                    limit: PAGE_SIZE,
-                    anchor: None,
-                    kind: self.library_kind,
-                })
-                .is_err()
-            {
-                self.notice("Too many pending commands; try again shortly.");
-                return;
-            }
-            self.offset = offset;
-            self.library_jump = Some(target);
-            // Clear the old rows so actions cannot target them while the page loads.
-            self.tracks.clear();
+        let Some(index) = target.index(self.total) else {
+            self.library_jump = None;
             self.library_selection.select(None);
-        } else if self.library_jump.is_some() {
-            self.library_jump = Some(target);
+            return;
+        };
+        if (self.offset..self.offset + self.tracks.len()).contains(&index) {
+            if self
+                .library_request
+                .is_some_and(|offset| !(offset..offset + LIBRARY_WINDOW).contains(&index))
+            {
+                self.library_request = None;
+            }
+            self.library_jump = None;
+            self.library_selection.select(Some(index - self.offset));
+            self.prefetch_library(commands);
         } else {
-            let row = ListTarget::Row(index - offset);
-            self.library_selection.select(row.index(self.tracks.len()));
+            let offset = index.saturating_sub(PAGE_SIZE) / PAGE_SIZE * PAGE_SIZE;
+            let loading = self
+                .library_request
+                .is_some_and(|start| (start..start + LIBRARY_WINDOW).contains(&index));
+            if loading || self.request_library(offset, commands) {
+                self.library_jump = Some(target);
+            }
         }
     }
     fn move_selection(&mut self, delta: isize, commands: &mpsc::Sender<Command>) {
@@ -4135,164 +4180,255 @@ mod tests {
         assert_eq!(title_label(&live), "Radio · LIVE");
     }
 
+    fn reply_library(
+        app: &mut App,
+        request: Command,
+        rows: &[Track],
+        commands: &mpsc::Sender<Command>,
+    ) {
+        let Command::LibraryList {
+            offset,
+            limit,
+            ref query,
+            kind,
+            ..
+        } = request
+        else {
+            panic!("Expected a Library request");
+        };
+        assert_eq!(query, &app.library_query);
+        assert_eq!(kind, app.library_kind);
+        assert!(limit <= LIBRARY_WINDOW);
+        let (messages, _) = mpsc::unbounded_channel();
+        let page = &rows[offset.min(rows.len())..rows.len().min(offset + limit)];
+        app.message(
+            Message::Reply(
+                request,
+                Ok(serde_json::json!({"tracks": page, "total": rows.len()})),
+            ),
+            &messages,
+            commands,
+        );
+    }
+
     #[test]
     fn library_edge_jumps_load_the_destination_and_ignore_stale_pages() {
-        let mut app = navigation_app(PAGE_SIZE);
-        app.total = 450;
+        let rows = navigation_app(1450).tracks;
+        let mut app = navigation_app(LIBRARY_WINDOW);
+        app.total = rows.len();
         app.queue_selection.select(Some(7));
-        let rows = app.tracks.clone();
-        let query = app.library_query.clone();
         let (commands, mut requests) = mpsc::channel(8);
-        let (messages, _) = mpsc::unbounded_channel();
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         app.key(key('G'), &commands).unwrap();
         let request = requests.try_recv().unwrap();
-        assert!(
-            matches!(&request, Command::LibraryList { query: q, offset: 400, limit: PAGE_SIZE, .. } if q == &query)
-        );
-        assert!(app.tracks.is_empty());
+        assert_eq!(app.tracks, rows[..LIBRARY_WINDOW]);
+        assert!(app.selected_track().is_none());
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &commands)
             .unwrap();
         assert!(
             requests.try_recv().is_err(),
-            "Loading must not play a stale row"
+            "Loading must not play an old row"
         );
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &commands)
             .unwrap();
-        app.message(
-            Message::Reply(
-                Command::LibraryList {
-                    query: query.clone(),
-                    offset: 0,
-                    limit: PAGE_SIZE,
-                    anchor: None,
-                    kind: None,
-                },
-                Ok(serde_json::json!({"tracks": rows, "total": 450})),
-            ),
-            &messages,
+        reply_library(
+            &mut app,
+            Command::LibraryList {
+                query: "가 음악 🎵".into(),
+                offset: 0,
+                limit: LIBRARY_WINDOW,
+                anchor: None,
+                kind: None,
+            },
+            &rows,
             &commands,
         );
-        assert!(app.tracks.is_empty());
-        app.message(
-            Message::Reply(
-                request,
-                Ok(serde_json::json!({"tracks": &rows[..50], "total": 450})),
-            ),
-            &messages,
-            &commands,
-        );
-        assert_eq!(app.library_selection.selected(), Some(49));
-        assert_eq!(
-            app.queue_selection.selected(),
-            Some(7),
-            "A reply must not move the newly focused queue"
-        );
-
+        assert_eq!(app.tracks, rows[..LIBRARY_WINDOW]);
+        reply_library(&mut app, request, &rows, &commands);
+        assert_eq!(app.offset + app.library_selection.selected().unwrap(), 1449);
+        assert_eq!(app.queue_selection.selected(), Some(7));
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &commands)
             .unwrap();
-        for c in ['g', 'g'] {
-            app.key(key(c), &commands).unwrap();
-        }
-        let request = requests.try_recv().unwrap();
-        assert!(
-            matches!(&request, Command::LibraryList { query: q, offset: 0, .. } if q == &query)
-        );
-        app.message(
-            Message::Reply(
-                request,
-                Ok(serde_json::json!({"tracks": rows, "total": 450})),
-            ),
-            &messages,
-            &commands,
-        );
-        assert_eq!(app.library_selection.selected(), Some(0));
+        app.key(key('g'), &commands).unwrap();
+        app.key(key('g'), &commands).unwrap();
+        reply_library(&mut app, requests.try_recv().unwrap(), &rows, &commands);
+        assert_eq!(app.selected_track().unwrap().id, "0");
 
-        // Removing tracks during a request can move the last page backwards.
+        // A scan can remove the requested window while it is loading.
         app.key(key('G'), &commands).unwrap();
-        let request = requests.try_recv().unwrap();
-        app.message(
-            Message::Reply(request, Ok(serde_json::json!({"tracks": [], "total": 350}))),
-            &messages,
+        reply_library(
+            &mut app,
+            requests.try_recv().unwrap(),
+            &rows[..1100],
             &commands,
         );
-        let request = requests.try_recv().unwrap();
-        assert!(matches!(&request, Command::LibraryList { offset: 200, .. }));
-        app.message(
-            Message::Reply(
-                request,
-                Ok(serde_json::json!({"tracks": &rows[..150], "total": 350})),
-            ),
-            &messages,
+        reply_library(
+            &mut app,
+            requests.try_recv().unwrap(),
+            &rows[..1100],
             &commands,
         );
-        assert_eq!(app.library_selection.selected(), Some(149));
+        assert_eq!(app.selected_track().unwrap().id, "1099");
         assert!(requests.try_recv().is_err());
     }
 
     #[test]
-    fn library_navigation_crosses_the_page_boundary_after_g() {
-        let rows = navigation_app(212).tracks;
-        let mut app = navigation_app(PAGE_SIZE);
+    fn library_navigation_preserves_repeated_input_and_can_cancel_a_pending_jump() {
+        let rows = navigation_app(1450).tracks;
+        let mut app = navigation_app(LIBRARY_WINDOW);
         app.total = rows.len();
+        let (commands, mut requests) = mpsc::channel(8);
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        app.key(key('G'), &commands).unwrap();
+        let request = requests.try_recv().unwrap();
+        app.key(key('k'), &commands).unwrap();
+        app.key(key('k'), &commands).unwrap();
+        assert!(requests.try_recv().is_err());
+        reply_library(&mut app, request, &rows, &commands);
+        assert_eq!(app.selected_track().unwrap().id, "1447");
+
+        app.key(key('g'), &commands).unwrap();
+        app.key(key('g'), &commands).unwrap();
+        let stale = requests.try_recv().unwrap();
+        app.key(key('G'), &commands).unwrap();
+        reply_library(&mut app, stale, &rows, &commands);
+        assert_eq!(app.selected_track().unwrap().id, "1449");
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_library_fetch_keeps_the_loaded_selection_available() {
+        let mut app = navigation_app(LIBRARY_WINDOW);
+        app.total = 1450;
+        app.library_selection.select(Some(42));
+        let original = app.tracks.clone();
+        let (commands, mut requests) = mpsc::channel(1);
+        let (messages, _) = mpsc::unbounded_channel();
+        let key = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
+
+        app.connected = false;
+        app.key(key, &commands).unwrap();
+        assert_eq!(app.selected_track().unwrap().id, "42");
+        assert!(requests.try_recv().is_err());
+
+        app.connected = true;
+        commands.try_send(Command::Status).unwrap();
+        app.key(key, &commands).unwrap();
+        assert_eq!(app.selected_track().unwrap().id, "42");
+        requests.try_recv().unwrap();
+
+        app.key(key, &commands).unwrap();
+        let request = requests.try_recv().unwrap();
+        assert!(app.selected_track().is_none());
+        app.message(
+            Message::Reply(request, Err("Cannot load Library".into())),
+            &messages,
+            &commands,
+        );
+        assert_eq!(app.tracks, original);
+        assert_eq!(app.selected_track().unwrap().id, "42");
+        assert!(app.library_request.is_none());
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
+    fn library_prefetch_preserves_the_rendered_view_in_both_directions() {
+        use ratatui::backend::TestBackend;
+        let rows = navigation_app(1450).tracks;
+        let mut app = navigation_app(LIBRARY_WINDOW);
+        app.total = rows.len();
+        app.library_kind = Some(Kind::Video);
+        let (commands, mut requests) = mpsc::channel(8);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut replacements = 0;
+        for (character, index) in (1..1100)
+            .map(|i| ('j', i))
+            .chain((0..1099).rev().map(|i| ('k', i)))
+        {
+            app.key(
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                &commands,
+            )
+            .unwrap();
+            assert_eq!(app.selected_track().unwrap().id, index.to_string());
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let before = terminal.backend().buffer().clone();
+            if let Ok(request) = requests.try_recv() {
+                reply_library(&mut app, request, &rows, &commands);
+                terminal.draw(|frame| app.draw(frame)).unwrap();
+                assert_eq!(
+                    &before,
+                    terminal.backend().buffer(),
+                    "fetch moved the view at {index}"
+                );
+                replacements += 1;
+            }
+            assert!(app.tracks.len() <= LIBRARY_WINDOW);
+        }
+        assert!(replacements >= 4);
+    }
+
+    #[test]
+    fn library_scroll_keeps_neighboring_rows_visible_across_a_page_boundary() {
+        use ratatui::backend::TestBackend;
+
+        let rows = navigation_app(212).tracks;
+        let mut app = navigation_app(0);
         let (commands, mut requests) = mpsc::channel(8);
         let (messages, _) = mpsc::unbounded_channel();
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
-        let load = |app: &mut App, request, offset| {
-            assert!(matches!(
-                &request,
-                Command::LibraryList { offset: requested, limit: PAGE_SIZE, query, kind, anchor: None }
-                    if *requested == offset && *query == app.library_query && *kind == app.library_kind
-            ));
+        let load = |app: &mut App, request| {
+            let Command::LibraryList { offset, limit, .. } = &request else {
+                panic!("Expected a Library request");
+            };
+            let page = &rows[*offset..rows.len().min(offset + limit)];
             app.message(
                 Message::Reply(
                     request,
-                    Ok(serde_json::json!({
-                        "tracks": &rows[offset..rows.len().min(offset + PAGE_SIZE)],
-                        "total": rows.len(),
-                    })),
+                    Ok(serde_json::json!({"tracks": page, "total": rows.len()})),
                 ),
                 &messages,
                 &commands,
             );
         };
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let mut draw = |app: &mut App| {
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
 
+        app.refresh(&commands);
+        load(&mut app, requests.try_recv().unwrap());
         app.key(key('G'), &commands).unwrap();
-        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
-        assert_eq!(app.selected_track().unwrap().id, "211");
-        for row in (PAGE_SIZE..211).rev() {
-            app.key(key('k'), &commands).unwrap();
-            assert_eq!(app.selected_track().unwrap().id, row.to_string());
+        if let Ok(request) = requests.try_recv() {
+            load(&mut app, request);
         }
-        app.key(key('k'), &commands).unwrap();
-        let request = requests.try_recv().expect("k must load the previous page");
-        assert!(app.selected_track().is_none());
-        app.key(key('k'), &commands).unwrap();
-        assert!(requests.try_recv().is_err());
-        load(&mut app, request, 0);
-        assert_eq!(app.selected_track().unwrap().id, "198");
+        assert!(draw(&mut app).contains("› Track 211"));
+        for _ in 0..11 {
+            app.key(key('k'), &commands).unwrap();
+            draw(&mut app);
+        }
+        assert!(draw(&mut app).contains("› Track 200"));
 
-        app.key(key('j'), &commands).unwrap();
-        assert_eq!(app.selected_track().unwrap().id, "199");
-        app.key(key('j'), &commands).unwrap();
-        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
-        assert_eq!(app.selected_track().unwrap().id, "200");
-
-        app.key(
-            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-            &commands,
-        )
-        .unwrap();
-        load(&mut app, requests.try_recv().unwrap(), 0);
-        assert_eq!(app.selected_track().unwrap().id, "190");
-        app.key(
-            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
-            &commands,
-        )
-        .unwrap();
-        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
-        assert_eq!(app.selected_track().unwrap().id, "200");
+        app.key(key('k'), &commands).unwrap();
+        let text = draw(&mut app);
+        assert!(
+            text.contains("› Track 199") && text.contains("Track 200"),
+            "{text}"
+        );
         assert!(requests.try_recv().is_err());
+        app.key(key('j'), &commands).unwrap();
+        let text = draw(&mut app);
+        assert!(
+            text.contains("› Track 200") && text.contains("Track 199"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -6133,6 +6269,7 @@ mod tests {
             pending_z: false,
             pending_ctrl_w: false,
             library_jump: None,
+            library_request: None,
             input: None,
             search_restore: None,
             search_pending: None,

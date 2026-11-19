@@ -188,6 +188,7 @@ impl App {
         self.total = value["total"].as_u64().unwrap_or(0) as usize;
         self.tracks = tracks;
         self.library_jump = None;
+        self.library_request = None;
         self.library_selection.select(Some(index));
         self.focus = Focus::Library;
         self.pending_g = false;
