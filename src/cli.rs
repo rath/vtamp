@@ -438,6 +438,10 @@ pub enum Library {
     Delete {
         id: String,
     },
+    /// Move one original audio file in a registered folder to the server's Trash.
+    Trash {
+        id: String,
+    },
     Scan {
         #[command(flatten)]
         wait: ScanWait,
@@ -1259,6 +1263,7 @@ pub async fn run(args: Args) -> Result<()> {
             }
             Library::Retag { id } => Command::LibraryRetag { id },
             Library::Delete { id } => Command::LibraryDelete { id },
+            Library::Trash { id } => Command::LibraryTrash { id },
             Library::Remove { path, .. } => Command::LibraryRemove {
                 path: platform::absolute(&path)?,
             },

@@ -629,7 +629,7 @@ from creating duplicates when restoring into the source Library. File copies liv
 under `imports/archive/UUID`; YouTube resources retain
 `imports/youtube/VIDEO_ID` for full sources or
 `imports/youtube/VIDEO_ID--START_MS-END_MS` for excerpts (`end` for an omitted end).
-Restored local copies keep local-file deletion protection.
+Restored folder tracks support the explicit `library_trash` operation.
 
 Workers handle hashing, decompression, file validation and publication outside
 the playback owner loop. New directories are staged under
@@ -645,6 +645,25 @@ are removed after successful cleanup. A lost commit acknowledgement
 leaves the journal for startup, rather than guessing the outcome. Export writes
 beside its destination and publishes without replacing an existing file.
 Database version remains 6.
+
+## Move a folder track to Trash
+
+`library_trash` takes a Library track `id` and returns
+`{"trashed":"TRACK_ID","warning":null}`. This additive version-15 command
+moves a single original audio file in a registered folder to the server user’s
+system Trash. The server resolves the ID and checks the canonical path, file
+type, size and modification time against its last scan. It preserves the parent
+directory, shared artwork and other files. A managed import or stream returns
+`not_folder_track`. Scans, imports, restores and cover updates have the same
+`library_busy` rules as managed deletion.
+
+Queue, playback, revisions and events follow `library_delete`. The server
+prepares the catalog and session transaction and journals the path and matching
+queue IDs before the Trash move. A failed move rolls back the transaction.
+After interruption, startup completes the transaction if the file left its
+original directory and the entry still exists. An unavailable volume defers
+recovery. A successful move never requires a rescan. Restoring the file from
+Trash and rescanning registers the track again.
 
 ## Optional installed-tool imports
 

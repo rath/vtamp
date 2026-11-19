@@ -399,6 +399,12 @@ struct SearchRestore {
 enum Confirm {
     /// Empty the whole queue, which also stops playback.
     ClearQueue,
+    TrashFile {
+        id: String,
+        title: String,
+        path: PathBuf,
+        scroll: u16,
+    },
     DeleteDownload {
         id: String,
         title: String,
@@ -1444,11 +1450,21 @@ impl App {
         match key.code {
             KeyCode::Enter => match self.confirm.take().unwrap() {
                 Confirm::ClearQueue => self.send(commands, Command::QueueClear),
+                Confirm::TrashFile { id, .. } => self.send(commands, Command::LibraryTrash { id }),
                 Confirm::DeleteDownload { id, .. } => {
                     self.send(commands, Command::LibraryDelete { id })
                 }
             },
             KeyCode::Esc | KeyCode::Char('q') => self.confirm = None,
+            KeyCode::Down | KeyCode::Up => {
+                if let Some(Confirm::TrashFile { scroll, .. }) = &mut self.confirm {
+                    *scroll = if key.code == KeyCode::Down {
+                        scroll.saturating_add(1)
+                    } else {
+                        scroll.saturating_sub(1)
+                    };
+                }
+            }
             _ => (),
         }
         true
@@ -1993,6 +2009,15 @@ impl App {
                             self.refresh(commands);
                             return;
                         }
+                        Command::LibraryTrash { .. } => {
+                            self.notice(
+                                value["warning"]
+                                    .as_str()
+                                    .unwrap_or("Original file moved to Trash."),
+                            );
+                            self.refresh(commands);
+                            return;
+                        }
                         Command::LibraryDelete { .. } => {
                             self.notice(
                                 value["warning"]
@@ -2496,10 +2521,13 @@ impl App {
                             title: t.title.clone(),
                             file: source.local().is_some(),
                         });
-                    } else {
-                        self.notice(
-                            "Files in registered folders are kept; only imports can be deleted here.",
-                        );
+                    } else if let Some(path) = t.playback.file() {
+                        self.confirm = Some(Confirm::TrashFile {
+                            id: t.id.clone(),
+                            title: t.title.clone(),
+                            path: path.to_owned(),
+                            scroll: 0,
+                        });
                     }
                 }
             }
@@ -2884,11 +2912,52 @@ impl App {
     /// from the live state, so a queue change behind the dialog is reflected.
     fn draw_confirm(&mut self, frame: &mut Frame, area: Rect) {
         let p = self.theme.palette();
-        let Some(confirm) = self.confirm.as_ref() else {
+        let Some(confirm) = self.confirm.as_mut() else {
             return;
         };
         self.caret = None;
         let (title, question, consequence, hint) = match confirm {
+            Confirm::TrashFile {
+                title,
+                path,
+                scroll,
+                ..
+            } => {
+                let popup = centered(area, 82, 14);
+                let panel = block(p, " Move original file to Trash? ", true)
+                    .style(Style::default().fg(p.text).bg(p.panel));
+                let inner = panel.inner(popup);
+                frame.render_widget(Clear, popup);
+                frame.render_widget(panel, popup);
+                let [song, file, effects, actions] = Layout::vertical([
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                    Constraint::Length(2),
+                    Constraint::Length(1),
+                ])
+                .areas(inner);
+                frame.render_widget(Paragraph::new(title.as_str()), song);
+                let paragraph = Paragraph::new(format!("{path:?}")).wrap(Wrap { trim: false });
+                let max_scroll =
+                    (paragraph.line_count(file.width) as u16).saturating_sub(file.height);
+                *scroll = (*scroll).min(max_scroll);
+                frame.render_widget(paragraph.scroll((*scroll, 0)), file);
+                frame.render_widget(
+                    Paragraph::new("Removes all queued copies.\nStops this track if current.")
+                        .style(Style::default().fg(p.warning)),
+                    effects,
+                );
+                let hint = if max_scroll > 0 {
+                    "Enter trash · Esc cancel · ↑↓ path"
+                } else {
+                    "Enter trash · Esc cancel"
+                };
+                frame.render_widget(
+                    Paragraph::new(hint).style(Style::default().fg(p.muted)),
+                    actions,
+                );
+                return;
+            }
             Confirm::ClearQueue => {
                 let queued = self.state.queue.len();
                 let consequence = if self.state.direct.is_some() {
@@ -4770,7 +4839,7 @@ mod tests {
     }
 
     #[test]
-    fn library_delete_requires_confirmation_and_preserves_local_files() {
+    fn library_delete_requires_confirmation_and_trash_is_explicit() {
         let mut app = youtube_app(PlaybackStatus::Stopped);
         app.tracks[0].title = "A very long downloaded title ".repeat(12);
         let (commands, mut requests) = mpsc::channel(8);
@@ -4809,10 +4878,46 @@ mod tests {
             matches!(requests.try_recv().unwrap(), Command::LibraryDelete { id } if id == "track")
         );
         app.tracks[0].source = None;
+        app.tracks[0].playback = PlaybackSource::File {
+            path: format!("/Music/{}/original.wav", "long folder/".repeat(24)).into(),
+        };
+        for trigger in ['d', 'x'] {
+            app.key(key(KeyCode::Char(trigger)), &commands).unwrap();
+            assert!(matches!(app.confirm, Some(Confirm::TrashFile { .. })));
+            assert!(requests.try_recv().is_err());
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(40, 12)).unwrap();
+            for expected in ["/Music/", "original.wav"] {
+                terminal.draw(|frame| app.draw(frame)).unwrap();
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect();
+                for label in [
+                    expected,
+                    "Move original file to Trash?",
+                    "Enter trash",
+                    "Esc cancel",
+                    "Removes all queued copies",
+                    "Stops this track if current",
+                ] {
+                    assert!(text.contains(label), "{label}: {text}");
+                }
+                for _ in 0..20 {
+                    app.key(key(KeyCode::Down), &commands).unwrap();
+                }
+            }
+            app.key(key(KeyCode::Esc), &commands).unwrap();
+            assert!(app.confirm.is_none());
+            assert!(requests.try_recv().is_err());
+        }
         app.key(key(KeyCode::Char('d')), &commands).unwrap();
-        assert!(app.confirm.is_none());
-        assert!(app.notice.contains("Files in registered folders are kept"));
-        assert!(requests.try_recv().is_err());
+        app.key(key(KeyCode::Enter), &commands).unwrap();
+        assert!(
+            matches!(requests.try_recv().unwrap(), Command::LibraryTrash { id } if id == "track")
+        );
     }
 
     #[test]

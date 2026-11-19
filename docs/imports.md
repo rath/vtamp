@@ -227,9 +227,15 @@ is `vtamp library delete TRACK_ID` and deletes without an interactive prompt.
 Deletion is limited to vtamp's own directories with matching source records: full
 or excerpt downloads under `imports/youtube/` and imported video files under
 `imports/local/`. Files registered through `library add FOLDER` are
-original files, not copies, and cannot be deleted this way. Remove a folder
-registration with `library remove FOLDER` instead. Radio entries are unregistered
-without deleting files.
+original files. Press `d` or `x` on one in Library to see the title and file
+path. Enter moves that file to the server user’s system Trash. Esc cancels.
+Use ↑/↓ to read a long path in a small terminal. The equivalent CLI command
+is `vtamp library trash TRACK_ID` and runs without a prompt. The folder, shared
+cover and neighboring files stay in place. If the system cannot move the file,
+the command reports the error. To restore a track, move its file back from
+Trash and press `R` to rescan. Emptying Trash is a separate system action.
+Use `library remove FOLDER` to unregister an entire folder. Radio entries are
+unregistered without deleting files.
 
 Deletion removes all queued copies automatically, including copies with a
 different track ID that point to the same file. If the track is current in Queue
@@ -240,7 +246,7 @@ removes the source metadata and Library entry, so a rescan does not bring it
 back. Importing the URL again downloads a new copy. Historical import reports
 remain historical and may refer to the deleted track ID.
 
-Files are staged before the catalog and session transaction. Library removal and
+Managed import files are staged before the catalog and session transaction. Library removal and
 Queue changes commit together before playback changes. A failed transaction
 restores the files and keeps Queue and playback unchanged; server startup
 recovers an interrupted deletion. If final cleanup fails, the command returns a

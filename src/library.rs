@@ -92,6 +92,26 @@ pub fn supported(path: &Path) -> bool {
     })
 }
 
+// A registered home or volume can contain the OS Trash itself. Prune it
+// during traversal and also when a root points directly into it.
+fn is_trash_dir(path: &Path, home_trash: Option<&Path>) -> bool {
+    if home_trash == Some(path) {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    return path.file_name().is_some_and(|name| name == ".Trashes");
+    #[cfg(not(target_os = "macos"))]
+    return path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| {
+            name == ".Trash"
+                || name
+                    .strip_prefix(".Trash-")
+                    .is_some_and(|uid| uid.parse::<u32>().is_ok())
+        });
+}
+
 pub fn scan(paths: &[PathBuf], old: &[Record], cache: &Path) -> Scan {
     let previous: HashMap<_, _> = old
         .iter()
@@ -99,13 +119,27 @@ pub fn scan(paths: &[PathBuf], old: &[Record], cache: &Path) -> Scan {
         .collect();
     let mut seen = HashSet::new();
     let mut result = Scan::default();
+    let home_trash = directories::BaseDirs::new().map(|dirs| {
+        #[cfg(target_os = "macos")]
+        let trash = dirs.home_dir().join(".Trash");
+        #[cfg(not(target_os = "macos"))]
+        let trash = dirs.data_dir().join("Trash");
+        trash.canonicalize().unwrap_or(trash)
+    });
     for root in paths {
+        if root
+            .ancestors()
+            .any(|dir| is_trash_dir(dir, home_trash.as_deref()))
+        {
+            continue;
+        }
         for entry in WalkDir::new(root)
             .follow_links(false)
             .sort_by_file_name()
             .into_iter()
             .filter_entry(|e| {
-                e.file_name() != ".staging"
+                !(e.file_type().is_dir() && is_trash_dir(e.path(), home_trash.as_deref()))
+                    && e.file_name() != ".staging"
                     && !e.file_name().to_string_lossy().starts_with(".replaced-")
             })
         {
@@ -346,6 +380,27 @@ mod tests {
     fn search_normalizes_korean_and_case() {
         assert_eq!(normalized("가"), normalized("가"));
         assert_eq!(normalized("ＭUSIC"), "music");
+    }
+    #[test]
+    fn scan_skips_volume_trash_even_with_an_overlapping_root() {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(target_os = "macos")]
+        let trash = dir.path().join(".Trashes/501");
+        #[cfg(not(target_os = "macos"))]
+        let trash = dir.path().join(".Trash-1000/files");
+        fs::create_dir_all(&trash).unwrap();
+        fs::copy("tests/fixtures/stereo.wav", trash.join("discarded.wav")).unwrap();
+        fs::copy("tests/fixtures/stereo.wav", dir.path().join("kept.wav")).unwrap();
+        let result = scan(&[dir.path().into(), trash], &[], dir.path());
+        assert_eq!(result.records.len(), 1);
+        assert!(
+            result.records[0]
+                .track
+                .playback
+                .file()
+                .unwrap()
+                .ends_with("kept.wav")
+        );
     }
     #[test]
     fn damaged_file_does_not_abort_scan() {

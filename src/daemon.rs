@@ -120,6 +120,7 @@ pub async fn run(
     };
     let mut store = Store::open(&paths.database())?;
     crate::deletion::recover(&paths, &store)?;
+    crate::deletion::trash::recover(&paths, &mut store)?;
     crate::archive::recover(&paths, &store)?;
     store.interrupt_scans(unix_ms())?;
     store.repair_import_titles()?;
@@ -623,7 +624,7 @@ fn worker(
                             }
                             let _ = answer.send(result.unwrap_or_else(failure));
                         }
-                        Command::LibraryDelete { id } => {
+                        Command::LibraryDelete { ref id } | Command::LibraryTrash { ref id } => {
                             let revision = engine.state.revision;
                             let result = (|| -> Result<Reply> {
                                 if engine.state.scanning
@@ -633,8 +634,16 @@ fn worker(
                                 {
                                     return Err(ApiError::new("library_busy", "Wait for scans, imports and cover updates to finish before deleting").into());
                                 }
-                                let result =
-                                    crate::deletion::delete(&paths, &mut store, &mut engine, &id)?;
+                                let result = if matches!(command, Command::LibraryTrash { .. }) {
+                                    crate::deletion::trash::move_track(
+                                        &paths,
+                                        &mut store,
+                                        &mut engine,
+                                        id,
+                                    )?
+                                } else {
+                                    crate::deletion::delete(&paths, &mut store, &mut engine, id)?
+                                };
                                 Ok(Reply::success(result))
                             })();
                             if result.is_ok() {

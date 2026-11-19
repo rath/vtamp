@@ -161,6 +161,11 @@ vtamp library scan --wait --timeout 60s --json
 vtamp library scan-status JOB_ID --json
 ```
 
+`library trash TRACK_ID` moves a folder track’s original audio file to the
+server user’s system Trash. It also removes queued copies and stops playback
+if that track is current. The CLI runs without a prompt. For a managed import,
+`library delete TRACK_ID` permanently deletes the managed copy.
+
 `library add`, `remove`, and `scan` normally acknowledge startup with
 `{scanning: true, job_id: "…"}`. `--wait` waits for that job, leaving the server
 free to handle playback. Its default timeout is 60 seconds; `s`, `m`, and `h`

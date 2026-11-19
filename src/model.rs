@@ -371,6 +371,9 @@ pub enum Command {
     LibraryDelete {
         id: String,
     },
+    LibraryTrash {
+        id: String,
+    },
     LibraryScan,
     CoverRefresh {
         /// Refresh one track instead of every managed YouTube import.

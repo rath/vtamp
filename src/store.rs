@@ -191,15 +191,18 @@ impl Store {
         )?;
         Ok(())
     }
-    pub(crate) fn delete_import(&mut self, id: &str, state: &State) -> Result<()> {
+    pub(crate) fn prepare_track_delete(
+        &mut self,
+        id: &str,
+        state: &State,
+    ) -> Result<rusqlite::Transaction<'_>> {
         let tx = self.db.transaction()?;
         if tx.execute("DELETE FROM tracks WHERE id=?1", [id])? == 0 {
             return Err(ApiError::new("track_not_found", "Library track not found").into());
         }
         tx.execute("DELETE FROM track_metadata WHERE id=?1", [id])?;
         tx.execute("INSERT INTO session(id,json) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET json=excluded.json", [serde_json::to_string(state)?])?;
-        tx.commit()?;
-        Ok(())
+        Ok(tx)
     }
     pub fn records(&self) -> Result<Vec<Record>> {
         let strings = self
@@ -460,13 +463,15 @@ impl Store {
     }
 
     pub fn track(&self, id: &str) -> Result<Option<Track>> {
+        Ok(self.record(id)?.map(|record| record.track))
+    }
+
+    pub(crate) fn record(&self, id: &str) -> Result<Option<Record>> {
         let json: Option<String> = self
             .db
             .query_row("SELECT json FROM catalog WHERE id=?1", [id], |r| r.get(0))
             .optional()?;
-        Ok(json
-            .map(|s| serde_json::from_str::<Record>(&s).map(|r| r.track))
-            .transpose()?)
+        Ok(json.map(|s| serde_json::from_str(&s)).transpose()?)
     }
 
     /// Record a published video sidecar on an indexed track. Returns the track

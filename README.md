@@ -172,7 +172,7 @@ Read-only commands (`status`, `watch`, volume without a value, queue listing, li
 | `Ctrl+Enter` | Play the selected Library track without adding it to Queue |
 | `e` | Append a library track without interrupting playback; duplicates allowed |
 | `A` | Queue every track the Library view shows, in one atomic append that skips tracks Queue already holds |
-| `x` / `d` | Remove a queue entry; in Library, delete a YouTube download or an imported video file, or unregister a stream, after confirmation |
+| `x` / `d` | Remove a queue entry. In Library, confirm moving a folder track’s original file to Trash, deleting a managed import, or unregistering a stream |
 | `X` | Empty the Queue after a confirmation dialog |
 | `J` / `K` | Move the selected queue entry down / up; unavailable while a queue filter is applied |
 | `v` | Toggle the read-only audio spectrum |
@@ -216,6 +216,7 @@ Run `vtamp --help` or `vtamp COMMAND --help` for argument details. All non-TUI c
 | `library add PATH`, `library remove PATH` | Register/unregister a directory; never delete music files |
 | `library add FILE [--audio-only] [--title TEXT] [--artist TEXT] [--wait]` | With installed FFmpeg, [import a video file](docs/imports.md#import-a-video-file) as a managed copy with a 480p picture; the original is only read |
 | `library delete TRACK_ID` | Permanently delete a managed import (a YouTube download or an imported video file) and all queued copies; refuses files in registered folders |
+| `library trash TRACK_ID` | Move the original audio file in a registered folder to the server’s Trash and remove all queued copies |
 | `library scan [--wait] [--timeout 60s]` | Rescan and optionally await a report; add/remove also accept wait options |
 | `library scan-status JOB_ID` | Inspect a running or recent scan |
 | `library cover refresh [TRACK_ID\|all] [--wait]` | Re-fetch thumbnails and rebuild covers for managed YouTube imports |

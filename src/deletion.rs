@@ -1,4 +1,5 @@
-//! Delete only validated managed imports; never files in registered folders.
+//! Remove managed imports and move individually confirmed folder tracks to Trash.
+pub(crate) mod trash;
 use crate::{
     audio::PlaybackBackend,
     engine::Engine,
@@ -52,7 +53,7 @@ pub(crate) fn managed_path(paths: &Paths, track: &Track) -> Result<PathBuf> {
     let source = track.source.as_ref().ok_or_else(|| {
         ApiError::new(
             "not_managed",
-            "Only managed imports can be deleted; files in registered folders are kept",
+            "Use library trash for an original file in a registered folder",
         )
     })?;
     source.validate()?;
@@ -82,20 +83,24 @@ fn cleanup(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn is_download(track: &Track, id: &str, audio: &Path) -> bool {
+fn matches_track(track: &Track, id: &str, audio: &Path) -> bool {
     track.id == id
         || track.playback.file().is_some_and(|path| {
             path == audio || path.canonicalize().is_ok_and(|path| path == audio)
         })
 }
 
-fn without_download(state: &State, id: &str, audio: &Path) -> State {
-    let removed: HashSet<_> = state
+fn matching_entries(state: &State, id: &str, audio: &Path) -> HashSet<String> {
+    state
         .queue
         .iter()
-        .filter(|item| is_download(&item.track, id, audio))
-        .map(|item| item.id.as_str())
-        .collect();
+        .chain(state.direct.as_deref())
+        .filter(|item| matches_track(&item.track, id, audio))
+        .map(|item| item.id.clone())
+        .collect()
+}
+
+fn without_entries(state: &State, removed: &HashSet<String>) -> State {
     let mut next = state.clone();
     next.queue
         .retain(|item| !removed.contains(item.id.as_str()));
@@ -114,13 +119,13 @@ fn without_download(state: &State, id: &str, audio: &Path) -> State {
     let removed_direct = state
         .direct
         .as_ref()
-        .is_some_and(|item| is_download(&item.track, id, audio));
+        .is_some_and(|item| removed.contains(&item.id));
     if removed_direct {
         next.direct = None;
     }
     let removed_current = state
         .current()
-        .is_some_and(|item| is_download(&item.track, id, audio));
+        .is_some_and(|item| removed.contains(&item.id));
     if removed_current {
         next.current_id = None;
         next.queue_cursor = None;
@@ -151,13 +156,16 @@ pub fn delete<B: PlaybackBackend>(
         .ok_or_else(|| ApiError::new("track_not_found", "Library track not found"))?;
     let destination = managed_path(paths, &track)?;
     let audio = destination.join("audio.m4a");
-    let next = without_download(&engine.state, id, &audio);
+    let next = without_entries(&engine.state, &matching_entries(&engine.state, id, &audio));
     let staging = paths.data.join("imports/.staging");
     crate::platform::private_dir(&staging)?;
     directory(&staging)?;
     let staged = staging.join(format!("delete-{}", uuid::Uuid::new_v4()));
     fs::rename(&destination, &staged).context("Cannot stage download for deletion")?;
-    if let Err(error) = store.delete_import(id, &next) {
+    if let Err(error) = store
+        .prepare_track_delete(id, &next)
+        .and_then(|tx| Ok(tx.commit()?))
+    {
         fs::rename(&staged, &destination)
             .context("Cannot roll back download deletion; restart the server to recover")?;
         return Err(error);
@@ -404,6 +412,134 @@ mod tests {
         );
     }
 
+    fn folder_fixture() -> (tempfile::TempDir, Paths, Store, Track) {
+        let (home, paths, mut store, _) = fixture();
+        let folder = home.path().join("Music");
+        fs::create_dir(&folder).unwrap();
+        fs::copy("tests/fixtures/stereo.wav", folder.join("song.wav")).unwrap();
+        fs::write(folder.join("cover.jpg"), b"shared cover").unwrap();
+        let root = folder.canonicalize().unwrap();
+        store.add_root(&root).unwrap();
+        let scan = crate::library::scan(&[root], &[], &paths.cache);
+        store.replace_catalog(&scan.records).unwrap();
+        (home, paths, store, scan.records[0].track.clone())
+    }
+
+    #[test]
+    fn folder_trash_moves_one_file_and_removes_queued_and_direct_copies() {
+        let (_home, paths, mut store, track) = folder_fixture();
+        let audio = track.playback.file().unwrap();
+        let folder = audio.parent().unwrap();
+        let trash = paths.data.join("trashed.wav");
+        fs::write(folder.join("other.wav"), b"neighbor").unwrap();
+        let queued = QueueItem::new(track.clone());
+        let direct = QueueItem::new(track.clone());
+        let mut engine = engine(State {
+            queue: vec![queued.clone(), QueueItem::new(track.clone())],
+            play_next: vec![queued.id],
+            current_id: Some(direct.id.clone()),
+            direct: Some(Box::new(direct)),
+            status: PlaybackStatus::Playing,
+            ..Default::default()
+        });
+        let result = trash::move_with(&paths, &mut store, &mut engine, &track.id, |selected| {
+            assert_eq!(selected, audio);
+            Ok(fs::rename(selected, &trash)?)
+        })
+        .unwrap();
+        assert_eq!(result["trashed"], track.id);
+        assert!(result["warning"].is_null());
+        assert!(trash.exists() && !audio.exists());
+        assert_eq!(fs::read(folder.join("cover.jpg")).unwrap(), b"shared cover");
+        assert_eq!(fs::read(folder.join("other.wav")).unwrap(), b"neighbor");
+        assert!(engine.state.queue.is_empty() && engine.state.play_next.is_empty());
+        assert!(engine.state.direct.is_none() && engine.state.current_id.is_none());
+        assert_eq!(engine.state.status, PlaybackStatus::Stopped);
+        assert!(store.track(&track.id).unwrap().is_none());
+        assert_eq!(
+            saved_state(&paths),
+            serde_json::to_value(&engine.state).unwrap()
+        );
+        let scan = crate::library::scan(&store.roots().unwrap(), &[], &paths.cache);
+        assert!(scan.records.is_empty());
+        fs::rename(trash, audio).unwrap();
+        assert_eq!(
+            crate::library::scan(&store.roots().unwrap(), &[], &paths.cache)
+                .records
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn folder_trash_checks_registration_identity_and_database_before_moving() {
+        let (_home, paths, mut store, track) = folder_fixture();
+        let audio = track.playback.file().unwrap();
+        let root = audio.parent().unwrap();
+        let mut engine = engine(State::default());
+        let refuse = |_: &Path| -> Result<()> { panic!("Unsafe file passed to Trash") };
+        store.remove_root(root).unwrap();
+        assert!(trash::move_with(&paths, &mut store, &mut engine, &track.id, refuse).is_err());
+        store.add_root(root).unwrap();
+        let other = root.join("other.wav");
+        fs::rename(audio, &other).unwrap();
+        std::os::unix::fs::symlink(&other, audio).unwrap();
+        assert!(trash::move_with(&paths, &mut store, &mut engine, &track.id, refuse).is_err());
+        fs::remove_file(audio).unwrap();
+        fs::write(audio, b"replacement").unwrap();
+        assert!(trash::move_with(&paths, &mut store, &mut engine, &track.id, refuse).is_err());
+        fs::rename(other, audio).unwrap();
+        let db = rusqlite::Connection::open(paths.database()).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_delete BEFORE DELETE ON tracks BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        assert!(trash::move_with(&paths, &mut store, &mut engine, &track.id, refuse).is_err());
+        assert!(store.track(&track.id).unwrap().is_some());
+        assert!(audio.is_file());
+    }
+
+    #[test]
+    fn failed_and_interrupted_trash_moves_reconcile_catalog_and_path_aliases() {
+        for (moved, rescanned) in [(false, false), (true, false), (true, true)] {
+            let (_home, paths, mut store, track) = folder_fixture();
+            let audio = track.playback.file().unwrap();
+            let link = paths.data.join("alias.wav");
+            std::os::unix::fs::symlink(audio, &link).unwrap();
+            let mut alias = track.clone();
+            alias.id = "alias".into();
+            alias.playback = PlaybackSource::File { path: link };
+            let queued = QueueItem::new(alias);
+            let state = State {
+                queue: vec![queued.clone()],
+                current_id: Some(queued.id),
+                status: PlaybackStatus::Paused,
+                ..Default::default()
+            };
+            store.save(&state).unwrap();
+            let mut engine = engine(state.clone());
+            let result = trash::move_with(&paths, &mut store, &mut engine, &track.id, |file| {
+                if moved {
+                    fs::rename(file, paths.data.join("trashed.wav"))?;
+                }
+                anyhow::bail!("Injected Trash failure")
+            });
+            assert!(result.is_err());
+            assert_eq!(engine.state.queue, state.queue);
+            assert_eq!(saved_state(&paths), serde_json::to_value(&state).unwrap());
+            if rescanned {
+                let scan = crate::library::scan(
+                    &store.roots().unwrap(),
+                    &store.records().unwrap(),
+                    &paths.cache,
+                );
+                store.replace_catalog(&scan.records).unwrap();
+            }
+            trash::recover(&paths, &mut store).unwrap();
+            trash::recover(&paths, &mut store).unwrap();
+            assert_eq!(store.track(&track.id).unwrap().is_none(), moved);
+            assert_eq!(store.restore().unwrap().queue.is_empty(), moved);
+            assert_eq!(audio.exists(), !moved);
+        }
+    }
+
     #[test]
     fn removes_all_queue_copies_and_aliases_without_interrupting_other_playback() {
         for direct in [false, true] {
@@ -608,7 +744,11 @@ mod tests {
             let staged = staging.join(format!("delete-{}", uuid::Uuid::new_v4()));
             fs::rename(track.playback.file().unwrap().parent().unwrap(), &staged).unwrap();
             if committed {
-                store.delete_import(&track.id, &State::default()).unwrap();
+                store
+                    .prepare_track_delete(&track.id, &State::default())
+                    .unwrap()
+                    .commit()
+                    .unwrap();
             }
             recover(&paths, &store).unwrap();
             assert!(!staged.exists());

@@ -48,6 +48,7 @@ impl Runtime {
                 | Command::LibraryRemove { .. }
                 | Command::LibraryScan
                 | Command::LibraryDelete { .. }
+                | Command::LibraryTrash { .. }
                 | Command::LibraryEdit { .. }
                 | Command::LibraryRetag { .. }
                 | Command::ImportStart { .. }

@@ -244,7 +244,10 @@ from disk. Show the track title, permanent-file-deletion consequence, and
 Enter/Esc actions even at 40×12; long titles must not displace the warning.
 The confirmation also explains that all queued copies are removed and playback
 stops if this is the current track, including direct playback. Other playback
-continues. Local originals are kept and get an explanatory notice. Streams keep
+continues. For a folder track, show its title and original file path, with
+“Move original file to Trash?” and Enter/Esc actions. A long path scrolls with
+the arrow keys while the queue and playback consequences stay visible.
+Confirming moves that one file to the server’s system Trash. Streams keep
 their unregister confirmation. Removing the last track on a Library page returns
 to the last remaining page with the filter kept.
 
