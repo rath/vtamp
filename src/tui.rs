@@ -361,15 +361,15 @@ enum Focus {
     Library,
     Queue,
 }
-#[derive(Clone, Copy, PartialEq)]
-enum ListEdge {
-    First,
+#[derive(Clone, Copy)]
+enum ListTarget {
+    Row(usize),
     Last,
 }
-impl ListEdge {
+impl ListTarget {
     fn index(self, len: usize) -> Option<usize> {
         len.checked_sub(1).map(|last| match self {
-            Self::First => 0,
+            Self::Row(row) => row.min(last),
             Self::Last => last,
         })
     }
@@ -485,7 +485,7 @@ struct App {
     pending_g: bool,
     pending_z: bool,
     pending_ctrl_w: bool,
-    library_jump: Option<ListEdge>,
+    library_jump: Option<ListTarget>,
     input: Option<Input>,
     /// Filters applied before a search prompt opened; Esc restores them.
     search_restore: Option<SearchRestore>,
@@ -1989,9 +1989,9 @@ impl App {
                                 self.refresh(commands);
                                 return;
                             }
-                            if let Some(edge) = self.library_jump.take() {
-                                // A scan may have changed the last page while it was loading.
-                                self.jump_library(edge, commands);
+                            if let Some(target) = self.library_jump.take() {
+                                // A scan may have changed the destination while the page was loading.
+                                self.jump_library(target, commands);
                             } else {
                                 if let Some(index) = selected_id
                                     .and_then(|id| self.tracks.iter().position(|t| t.id == id))
@@ -2222,13 +2222,13 @@ impl App {
             }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
                 if previous_g {
-                    self.jump_selection(ListEdge::First, commands);
+                    self.jump_selection(ListTarget::Row(0), commands);
                 } else {
                     self.pending_g = true;
                 }
             }
             KeyCode::Char('G') if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                self.jump_selection(ListEdge::Last, commands);
+                self.jump_selection(ListTarget::Last, commands);
             }
             KeyCode::Char('z') if key.modifiers.is_empty() => {
                 if previous_z {
@@ -2286,15 +2286,15 @@ impl App {
                     Focus::Library
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
-            KeyCode::PageDown => self.move_selection(10),
-            KeyCode::PageUp => self.move_selection(-10),
+            KeyCode::Down | KeyCode::Char('j') => self.move_selection(1, commands),
+            KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1, commands),
+            KeyCode::PageDown => self.move_selection(10, commands),
+            KeyCode::PageUp => self.move_selection(-10, commands),
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_selection(10);
+                self.move_selection(10, commands);
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_selection(-10);
+                self.move_selection(-10, commands);
             }
             KeyCode::Char('/') => self.open_search(),
             KeyCode::Char('a') => self.input = Some(Input::Folder(String::new())),
@@ -2373,16 +2373,13 @@ impl App {
             KeyCode::Char(']')
                 if self.focus == Focus::Library && self.offset + PAGE_SIZE < self.total =>
             {
-                self.offset += PAGE_SIZE;
-                self.library_jump = None;
-                self.library_selection.select(Some(0));
-                self.refresh(commands);
+                self.jump_library(ListTarget::Row(self.offset + PAGE_SIZE), commands);
             }
             KeyCode::Char('[') if self.focus == Focus::Library => {
-                self.offset = self.offset.saturating_sub(PAGE_SIZE);
-                self.library_jump = None;
-                self.library_selection.select(Some(0));
-                self.refresh(commands);
+                self.jump_library(
+                    ListTarget::Row(self.offset.saturating_sub(PAGE_SIZE)),
+                    commands,
+                );
             }
             KeyCode::Char('f') if self.focus == Focus::Library && key.modifiers.is_empty() => {
                 self.cycle_library_kind(commands)
@@ -2495,19 +2492,17 @@ impl App {
         }
         Ok(false)
     }
-    fn jump_selection(&mut self, edge: ListEdge, commands: &mpsc::Sender<Command>) {
+    fn jump_selection(&mut self, target: ListTarget, commands: &mpsc::Sender<Command>) {
         if self.focus == Focus::Queue {
             self.queue_selection
-                .select(edge.index(self.queue_visible_len()));
+                .select(target.index(self.queue_visible_len()));
             return;
         }
-        self.jump_library(edge, commands);
+        self.jump_library(target, commands);
     }
-    fn jump_library(&mut self, edge: ListEdge, commands: &mpsc::Sender<Command>) {
-        let offset = match edge {
-            ListEdge::First => 0,
-            ListEdge::Last => self.total.saturating_sub(1) / PAGE_SIZE * PAGE_SIZE,
-        };
+    fn jump_library(&mut self, target: ListTarget, commands: &mpsc::Sender<Command>) {
+        let index = target.index(self.total).unwrap_or(0);
+        let offset = index / PAGE_SIZE * PAGE_SIZE;
         if offset != self.offset {
             if !self.connected {
                 self.notice("Disconnected. Commands are not queued for replay.");
@@ -2527,35 +2522,32 @@ impl App {
                 return;
             }
             self.offset = offset;
-            self.library_jump = Some(edge);
-            // Never let Enter play an old page's row while the destination loads.
+            self.library_jump = Some(target);
+            // Clear the old rows so actions cannot target them while the page loads.
             self.tracks.clear();
             self.library_selection.select(None);
         } else if self.library_jump.is_some() {
-            self.library_jump = Some(edge);
+            self.library_jump = Some(target);
         } else {
-            self.library_selection.select(edge.index(self.tracks.len()));
+            let row = ListTarget::Row(index - offset);
+            self.library_selection.select(row.index(self.tracks.len()));
         }
     }
-    fn move_selection(&mut self, delta: isize) {
-        let len = if self.focus == Focus::Library {
-            self.tracks.len()
-        } else {
-            self.queue_visible_len()
-        };
-        let state = if self.focus == Focus::Library {
-            &mut self.library_selection
-        } else {
-            &mut self.queue_selection
-        };
-        if len > 0 {
-            state.select(Some(
-                state
-                    .selected()
-                    .unwrap_or(0)
-                    .saturating_add_signed(delta)
-                    .min(len - 1),
-            ));
+    fn move_selection(&mut self, delta: isize, commands: &mpsc::Sender<Command>) {
+        if self.focus == Focus::Library {
+            // Count from the requested row when another key arrives before its page.
+            let index = self
+                .library_jump
+                .and_then(|target| target.index(self.total))
+                .unwrap_or_else(|| self.offset + self.library_selection.selected().unwrap_or(0));
+            self.jump_library(
+                ListTarget::Row(index.saturating_add_signed(delta)),
+                commands,
+            );
+        } else if let Some(last) = self.queue_visible_len().checked_sub(1) {
+            let index = self.queue_selection.selected().unwrap_or(0);
+            self.queue_selection
+                .select(Some(index.saturating_add_signed(delta).min(last)));
         }
     }
     fn position(&self) -> u64 {
@@ -3751,7 +3743,7 @@ mod tests {
         app.key(key, &commands).unwrap();
         assert!(requests.try_recv().is_err());
         app.help = false;
-        app.library_jump = Some(ListEdge::Last);
+        app.library_jump = Some(ListTarget::Last);
         app.tracks.clear();
         app.key(key, &commands).unwrap();
         assert!(requests.try_recv().is_err());
@@ -4239,6 +4231,71 @@ mod tests {
     }
 
     #[test]
+    fn library_navigation_crosses_the_page_boundary_after_g() {
+        let rows = navigation_app(212).tracks;
+        let mut app = navigation_app(PAGE_SIZE);
+        app.total = rows.len();
+        let (commands, mut requests) = mpsc::channel(8);
+        let (messages, _) = mpsc::unbounded_channel();
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let load = |app: &mut App, request, offset| {
+            assert!(matches!(
+                &request,
+                Command::LibraryList { offset: requested, limit: PAGE_SIZE, query, kind, anchor: None }
+                    if *requested == offset && *query == app.library_query && *kind == app.library_kind
+            ));
+            app.message(
+                Message::Reply(
+                    request,
+                    Ok(serde_json::json!({
+                        "tracks": &rows[offset..rows.len().min(offset + PAGE_SIZE)],
+                        "total": rows.len(),
+                    })),
+                ),
+                &messages,
+                &commands,
+            );
+        };
+
+        app.key(key('G'), &commands).unwrap();
+        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
+        assert_eq!(app.selected_track().unwrap().id, "211");
+        for row in (PAGE_SIZE..211).rev() {
+            app.key(key('k'), &commands).unwrap();
+            assert_eq!(app.selected_track().unwrap().id, row.to_string());
+        }
+        app.key(key('k'), &commands).unwrap();
+        let request = requests.try_recv().expect("k must load the previous page");
+        assert!(app.selected_track().is_none());
+        app.key(key('k'), &commands).unwrap();
+        assert!(requests.try_recv().is_err());
+        load(&mut app, request, 0);
+        assert_eq!(app.selected_track().unwrap().id, "198");
+
+        app.key(key('j'), &commands).unwrap();
+        assert_eq!(app.selected_track().unwrap().id, "199");
+        app.key(key('j'), &commands).unwrap();
+        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
+        assert_eq!(app.selected_track().unwrap().id, "200");
+
+        app.key(
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &commands,
+        )
+        .unwrap();
+        load(&mut app, requests.try_recv().unwrap(), 0);
+        assert_eq!(app.selected_track().unwrap().id, "190");
+        app.key(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+            &commands,
+        )
+        .unwrap();
+        load(&mut app, requests.try_recv().unwrap(), PAGE_SIZE);
+        assert_eq!(app.selected_track().unwrap().id, "200");
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[test]
     fn control_f_and_b_page_lists_without_sending_previous_track() {
         let mut app = app();
         app.tracks = (0..25)
@@ -4257,6 +4314,7 @@ mod tests {
                 source: None,
             })
             .collect();
+        app.total = app.tracks.len();
         app.state.queue = app.tracks.iter().cloned().map(QueueItem::new).collect();
         let (commands, mut requests) = mpsc::channel(8);
         for focus in [Focus::Library, Focus::Queue] {

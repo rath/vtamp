@@ -61,6 +61,10 @@ Tab, Ctrl-W w, and Ctrl-W Ctrl-W switch Library/Queue. Both Ctrl-W sequences
 follow Tab's behavior when returning from the spectrum, and do not switch panels
 inside prompts or overlays. Any other intervening key cancels the prefix.
 
+Library movement keys (`j`/`k`, arrows, PageUp/PageDown, and Ctrl-B/F) move
+through the full set of matching tracks and load the destination page when
+crossing a page boundary. `[` and `]` select the first track of a Library page.
+
 Library Ctrl+Enter plays outside the queue; Enter retains its existing queue
 behavior. Mark direct playback with `NO QUEUE` in the Now Playing border and keep
 Library focus on attachment. Do not mark a queued copy as currently playing.
