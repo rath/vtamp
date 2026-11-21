@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Looper
 import androidx.datastore.preferences.core.edit
 import androidx.media3.common.*
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -54,7 +55,12 @@ class PlaybackRuntime(private val context: Context, private val store: AppStore)
                 DefaultRenderersFactory(context)
                     .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON),
             )
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(http)))
+            // Downloaded files are file: URIs; everything else goes through OkHttp.
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
+                )
+            )
             .setLoadControl(
                 DefaultLoadControl.Builder().setBufferDurationsMs(15000, 50000, 1500, 3000).build()
             )
@@ -268,6 +274,10 @@ class PlaybackRuntime(private val context: Context, private val store: AppStore)
         publish()
     }
 
+    fun shuffle(value: Boolean) {
+        if (queue.shuffle != value) shuffle()
+    }
+
     fun repeat() {
         queue.repeat = Repeat.entries[(queue.repeat.ordinal + 1) % Repeat.entries.size]
         saveModes()
@@ -299,7 +309,11 @@ class PlaybackRuntime(private val context: Context, private val store: AppStore)
         cancelRetry()
         val entry = queue.current ?: return
         val client = store.state.value.client
-        val uri = entry.track.url ?: client?.file(entry.track, "audio")
+        // A downloaded track plays from its file, with or without the server.
+        val uri =
+            entry.track.url
+                ?: store.downloads.file(entry.track)?.let { Uri.fromFile(it).toString() }
+                ?: client?.file(entry.track, "audio")
         if (uri == null) {
             error = "Connect to a server first"
             publish()
@@ -397,9 +411,10 @@ class PlaybackRuntime(private val context: Context, private val store: AppStore)
                 else MediaMetadata.MEDIA_TYPE_MUSIC
             )
             .setArtworkUri(
-                if (track.cover != null)
-                    store.state.value.client?.file(track, "cover")?.let(Uri::parse)
-                else null
+                store.downloads.cover(track)?.let(Uri::fromFile)
+                    ?: if (track.cover != null)
+                        store.state.value.client?.file(track, "cover")?.let(Uri::parse)
+                    else null
             )
             .build()
 

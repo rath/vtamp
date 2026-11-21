@@ -5,9 +5,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.xrath.vtamp.api.*
+import com.xrath.vtamp.downloads.DownloadStore
 import com.xrath.vtamp.model.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.io.File
 import kotlinx.serialization.json.*
 
 val Context.preferences by preferencesDataStore("vtamp")
@@ -48,6 +50,8 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
     val state = mutable.asStateFlow()
     val imports =
         ImportsStore(scope) { search(state.value.query, state.value.kind, immediate = true) }
+    /** Tracks kept on this phone. They outlive a change of server: their files play without one. */
+    val downloads = DownloadStore(File(context.filesDir, "downloads"), scope)
     var onServerChanged: (() -> Unit)? = null
     private var connection: Job? = null
     private var searchJob: Job? = null
