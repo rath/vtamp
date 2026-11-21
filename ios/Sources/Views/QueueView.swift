@@ -41,6 +41,7 @@ struct QueueView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(Player.self) private var player
+    @Environment(Downloads.self) private var downloads
     @State private var source: Source = .phone
     @State private var server = ServerQueueModel()
     @State private var confirmClear = false
@@ -93,6 +94,12 @@ struct QueueView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    DownloadMenuItems(track: track, downloads: downloads, client: app.client)
+                    Button("Remove from Queue", systemImage: "minus.circle", role: .destructive) {
+                        player.remove(atOffsets: [offset])
+                    }
+                }
             }
             .onDelete { player.remove(atOffsets: $0) }
             .onMove { player.move(fromOffsets: $0, toOffset: $1) }
@@ -135,6 +142,9 @@ struct QueueView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!item.track.isPlayable)
+                    .contextMenu {
+                        DownloadMenuItems(track: item.track, downloads: downloads, client: app.client)
+                    }
                 }
             }
         }

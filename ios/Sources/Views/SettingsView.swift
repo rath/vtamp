@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+    @Environment(Downloads.self) private var downloads
     @State private var address = ""
 
     var body: some View {
@@ -45,6 +46,17 @@ struct SettingsView: View {
                         }
                     }
                 }
+                Section {
+                    NavigationLink {
+                        DownloadsView()
+                    } label: {
+                        LabeledContent("Downloaded", value: downloadsSummary)
+                    }
+                } header: {
+                    Text("This iPhone")
+                } footer: {
+                    Text("Tracks downloaded from the player play from this iPhone, with or without the server.")
+                }
                 Section("About") {
                     LabeledContent("App version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                     Text("Plays Library files on this iPhone. The server's playback and Queue are not changed.")
@@ -56,5 +68,10 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear { if address.isEmpty { address = app.address } }
         }
+    }
+
+    private var downloadsSummary: String {
+        if downloads.items.isEmpty { return downloads.active.isEmpty ? "None" : "Downloading…" }
+        return "\(Formatting.tracks(downloads.items.count)) · \(Formatting.bytes(downloads.totalBytes))"
     }
 }

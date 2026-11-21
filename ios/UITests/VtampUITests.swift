@@ -260,6 +260,93 @@ final class VtampUITests: XCTestCase {
         }
     }
 
+    /// A track downloaded from the player is marked in the Library, listed
+    /// under Settings → Downloaded, and plays with the server out of reach.
+    @MainActor
+    func testDownloadPlaysWithoutTheServer() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["VTAMP_SERVER"] = server
+        app.launchEnvironment["VTAMP_MUTED"] = "1"
+        app.launch()
+        removeAllDownloads(app)
+
+        let title = ProcessInfo.processInfo.environment["VTAMP_UITEST_DOWNLOAD_TRACK"] ?? "Carrier Wave"
+        tab(app, "Library").tap()
+        let song = row(app, title)
+        guard song.waitForExistence(timeout: 15) else {
+            throw XCTSkip("The server has no track named \(title)")
+        }
+        gap(song).tap()
+        let download = app.buttons["download"]
+        XCTAssertTrue(download.waitForExistence(timeout: 10), "The player offers the download")
+        XCTAssertEqual(download.label, "Download")
+        download.tap()
+        wait(for: [expectation(for: NSPredicate(format: "label == 'Downloaded'"), evaluatedWith: download)], timeout: 30)
+        snapshot(app, "download-player")
+        app.buttons["Close"].tap()
+
+        let marked = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'Downloaded'", title)).firstMatch
+        XCTAssertTrue(marked.waitForExistence(timeout: 5), "The Library row carries the downloaded mark")
+        snapshot(app, "download-library")
+
+        tab(app, "Settings").tap()
+        let entry = downloadsEntry(app)
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        XCTAssertTrue(entry.label.contains("1 track"), entry.label)
+        snapshot(app, "download-settings")
+        entry.tap()
+        XCTAssertTrue(row(app, title).waitForExistence(timeout: 5), "Downloaded lists the track")
+        snapshot(app, "download-list")
+
+        // The same app with its server out of reach: the discard port.
+        app.terminate()
+        app.launchEnvironment["VTAMP_SERVER"] = "http://127.0.0.1:9/api"
+        app.launch()
+        let offline = app.buttons["Play Downloaded Tracks"]
+        XCTAssertTrue(offline.waitForExistence(timeout: 20), "The Library offers the downloads when it cannot load")
+        snapshot(app, "download-offline-library")
+        offline.tap()
+        let kept = row(app, title)
+        XCTAssertTrue(kept.waitForExistence(timeout: 5))
+        gap(kept).tap()
+        let position = app.sliders["Position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 10), "The player opens on the downloaded track")
+        let advanced = expectation(for: NSPredicate { slider, _ in
+            guard let value = (slider as? XCUIElement)?.value as? String else { return false }
+            return !["0:00", "0:01", "0:02"].contains(value)
+        }, evaluatedWith: position)
+        wait(for: [advanced], timeout: 20)
+        snapshot(app, "download-offline-playing")
+        app.buttons["Close"].tap()
+
+        removeAllDownloads(app)
+        XCTAssertTrue(downloadsEntry(app).label.hasSuffix("None"), downloadsEntry(app).label)
+    }
+
+    private func downloadsEntry(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Downloaded'")).firstMatch
+    }
+
+    /// Settings → Downloaded → Remove All, then back to Settings.
+    private func removeAllDownloads(_ app: XCUIApplication) {
+        tab(app, "Settings").tap()
+        let entry = downloadsEntry(app)
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let removeAll = app.buttons["Remove All"]
+        if removeAll.waitForExistence(timeout: 2) {
+            removeAll.tap()
+            let confirm = app.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH 'Remove ' AND label != 'Remove All'")).firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+            confirm.tap()
+        }
+        XCTAssertTrue(app.staticTexts["No Downloads"].waitForExistence(timeout: 5))
+        app.navigationBars["Downloaded"].buttons.firstMatch.tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+    }
+
     /// The slider's `m:ss` value in seconds.
     private func seconds(_ slider: XCUIElement) throws -> Int {
         let text = try XCTUnwrap(slider.value as? String)

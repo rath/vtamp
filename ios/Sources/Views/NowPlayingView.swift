@@ -15,9 +15,7 @@ struct MiniPlayer: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = player.lastError {
-                ErrorStrip(message: error) { player.lastError = nil }
-            }
+            FailureNotice(background: .red.opacity(0.15), shape: Rectangle())
             if let track = player.current {
                 HStack(spacing: 4) {
                     Button {
@@ -68,26 +66,6 @@ struct MiniPlayer: View {
     }
 }
 
-private struct ErrorStrip: View {
-    let message: String
-    let dismiss: () -> Void
-
-    var body: some View {
-        Text(message)
-            .font(.footnote)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .background(.red.opacity(0.15))
-            .onTapGesture(perform: dismiss)
-            .task(id: message) {
-                try? await Task.sleep(for: .seconds(5))
-                if !Task.isCancelled { dismiss() }
-            }
-    }
-}
-
 struct NowPlayingView: View {
     @Environment(Player.self) private var player
     @Environment(VideoRenderer.self) private var video
@@ -110,6 +88,12 @@ struct NowPlayingView: View {
             .padding(.horizontal, 24)
             .padding(.top, 8)
             .padding(.bottom, 4)
+        }
+        // The mini player's notice is under this sheet.
+        .overlay(alignment: .top) {
+            FailureNotice(background: .red.opacity(0.85), shape: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 60)
         }
         .environment(\.colorScheme, .dark)
         .foregroundStyle(.white)
@@ -139,6 +123,9 @@ struct NowPlayingView: View {
                 .buttonBorderShape(.capsule)
                 .tint(.white)
                 .accessibilityIdentifier("videoSwitch")
+            }
+            if let track = player.current, track.isDownloadable {
+                DownloadButton(track: track)
             }
         }
     }

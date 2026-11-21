@@ -23,6 +23,10 @@ enum Formatting {
     static func bytes(_ count: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
     }
+
+    static func tracks(_ count: Int) -> String {
+        count == 1 ? "1 track" : "\(count) tracks"
+    }
 }
 
 enum TimeParseError: LocalizedError, Equatable {

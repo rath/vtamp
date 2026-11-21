@@ -32,10 +32,10 @@ such as `music-box.tailnet.ts.net:8700` work too.
 
 | Tab | Contents |
 | --- | --- |
-| Library | Search by title, artist, or album and filter by kind, 200 tracks per page. Tapping a track plays it now, after the current track, keeping the rest of the queue, and opens the player; swipe or long-press for **Play Next** and **Add to Queue**. |
-| Queue | **This iPhone**: the phone's queue, with reordering, deletion, and Clear. **Server**: the server's Queue and what it is playing, read-only; tapping an entry plays the server's Queue from there on the phone. |
+| Library | Search by title, artist, or album and filter by kind, 200 tracks per page. Tapping a track plays it now, after the current track, keeping the rest of the queue, and opens the player; swipe or long-press for **Play Next** and **Add to Queue**, and long-press for **Download**. |
+| Queue | **This iPhone**: the phone's queue, with reordering, deletion, and Clear; long-press an entry for **Download** or **Remove from Queue**. **Server**: the server's Queue and what it is playing, read-only; tapping an entry plays the server's Queue from there on the phone. |
 | Import | A YouTube URL with native paste, optional **Save video (up to 480p)**, Start and End (seconds, `M:SS`, or `H:MM:SS`), and the whole playlist when the URL names one. Recent imports load 20 at a time as you scroll, with progress, Cancel, Retry, and Play for finished jobs. Shown only when the server has yt-dlp. |
-| Settings | The server address and what the server reports about itself. Besides the address, the app saves only the Cover / Video choice and the shuffle and repeat settings. |
+| Settings | The server address, what the server reports about itself, and **Downloaded**, the tracks kept on the phone (see [Downloads](#downloads)). Besides the address and the downloads, the app saves only the Cover / Video choice and the shuffle and repeat settings. |
 
 Video saving defaults to off for each new import. It applies to single videos,
 excerpts, and whole playlists; a successful submission resets it, while a failed
@@ -54,8 +54,8 @@ server retains 100 terminal reports and at most 32 queued/running jobs.
 
 Choosing a track to play, or tapping the bar above the tabs, opens the
 player: the cover (or the saved video) over the cover's blurred colors, the
-title, the position slider, previous, play or pause, and next, the output
-volume, and shuffle and repeat either side of an AirPlay button. Shuffle plays
+title, the download button, the position slider, previous, play or pause, and
+next, the output volume, and shuffle and repeat either side of an AirPlay button. Shuffle plays
 every entry of the phone's queue once per pass in a random order while the
 Queue tab keeps the shown order; repeat cycles off, all, one, and repeat-one
 applies to natural endings only, as in the TUI. Both are kept across launches.
@@ -103,8 +103,34 @@ previous cancel the wait, and an unsupported or unavailable stream pauses with a
 message. Channels show their host where files show the artist.
 
 Not on the iPhone: Ogg Vorbis files (they appear greyed out), the server's
-loudness normalization, and controlling the server's own playback. Nothing is
-downloaded for offline use.
+loudness normalization, and controlling the server's own playback.
+
+### Downloads
+
+Nothing is downloaded by itself. The arrow at the top right of the player
+keeps the current track on the iPhone: its audio file, its cover, and the
+Library row as the server described it. While the file arrives the button
+shows the progress, and a tap cancels; once the track is kept the button is
+lit, and its menu removes the download. Long-pressing a Library or Queue row
+offers **Download**, **Cancel Download**, or **Remove Download** too. Rows mark
+a kept track with a small gray arrow under the duration, and a ring while it
+downloads. Radio channels and files the iPhone cannot play are not offered.
+
+A downloaded track plays from its file wherever it is played, so it needs no
+server; when the Library cannot load, **Play Downloaded Tracks** opens the
+list. **Settings → Downloaded** lists the kept tracks, newest first, with each
+size and the total: tap one to play the list from there, use **Play** or
+**Shuffle**, swipe to remove one, or **Remove All**. Only the audio and the
+cover are kept, not the saved video: a downloaded video track away from its
+server shows its cover. A download is the file as it was: a retag or new cover
+on the server reaches it only when it is removed and downloaded again.
+
+A download runs while the app does, in the foreground or in the background
+while music plays; if iOS suspends the app, the download may fail and can be
+started again. A failed or cancelled download leaves no partial file. The
+files live in the app's Application Support directory, excluded from device
+backups (the server has them), and stay until they are removed in the app or
+the app is deleted.
 
 ### VP9 with libvpx
 
@@ -146,8 +172,9 @@ xcodebuild -project ios/Vtamp.xcodeproj -scheme Vtamp \
 
 Name the OS in `-destination` when the same device exists for several runtimes.
 The unit tests decode replies captured from a real server (`ios/Tests/Fixtures`),
-check request encoding, time and address parsing, and the queue logic against a
-fake audio engine. They do not play audio.
+check request encoding, time and address parsing, the queue logic against a
+fake audio engine, and downloads against a fake transport and a temporary
+directory. They do not play audio.
 
 ### Install on an iPhone
 
@@ -192,6 +219,13 @@ TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
 VTAMP_HOME="$vtamp_test_home" target/release/vtamp server stop
 ```
 
+The download regression downloads **Carrier Wave** from the player (set
+`TEST_RUNNER_VTAMP_UITEST_DOWNLOAD_TRACK` to use another track; it must be on
+the Library's first screen, and the test is skipped without it). It checks the
+row mark and **Settings → Downloaded**, relaunches the app against a closed
+port, plays the download from **Play Downloaded Tracks**, and removes every
+download at the start and the end.
+
 `ConnectionBannerUITests` needs no server and runs with the unit tests: it
 points the app at a closed local port and checks that the connection banner
 sits above the Library and Queue navigation bars instead of on their buttons.
@@ -231,8 +265,9 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/API` | HTTP client, protocol commands, address parsing |
 | `Sources/Model` | Library, Queue, and import types; time parsing |
 | `Sources/Player` | Queue and transport, AVPlayer engine, audio session, lock-screen controls, artwork cache |
+| `Sources/Downloads` | Tracks kept on the phone: the index, the files, and the download transfers |
 | `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the renderer that follows the audio clock |
-| `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings |
+| `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings, Downloaded |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 | `screenshots` | The app screenshots shown in the main README |
 

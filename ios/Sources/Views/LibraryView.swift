@@ -60,7 +60,9 @@ final class LibraryModel {
 struct LibraryView: View {
     @Environment(AppModel.self) private var app
     @Environment(Player.self) private var player
+    @Environment(Downloads.self) private var downloads
     @State private var model = LibraryModel()
+    @State private var showDownloads = false
 
     private struct ReloadKey: Equatable {
         let query: String
@@ -104,6 +106,7 @@ struct LibraryView: View {
                                 player.enqueue([track])
                             }
                         }
+                        DownloadMenuItems(track: track, downloads: downloads, client: app.client)
                     }
                 }
                 if model.canLoadMore {
@@ -135,6 +138,7 @@ struct LibraryView: View {
                     }
                 }
             }
+            .navigationDestination(isPresented: $showDownloads) { DownloadsView() }
             .refreshable { await model.reload(client: app.client, app: app) }
             .task(id: ReloadKey(query: model.query, kind: model.kind, base: app.client?.baseURL, revision: app.libraryRevision)) {
                 // Typing waits for a pause; other changes reload at once.
@@ -155,7 +159,17 @@ struct LibraryView: View {
                 description: Text("Add your vtamp server in Settings."))
         } else if model.tracks.isEmpty, !model.isLoading {
             if let error = model.error {
-                ContentUnavailableView("Cannot Load the Library", systemImage: "exclamationmark.triangle", description: Text(error))
+                ContentUnavailableView {
+                    Label("Cannot Load the Library", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    // Downloaded tracks play without the server.
+                    if !downloads.items.isEmpty {
+                        Button("Play Downloaded Tracks") { showDownloads = true }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
             } else if !model.query.isEmpty {
                 ContentUnavailableView.search(text: model.query)
             } else {
