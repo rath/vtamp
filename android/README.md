@@ -30,12 +30,13 @@ server at 100.64.0.1:8700."
 ## Screens
 
 - **Library:** title/artist/album search, All/Audio/Video/Radio filters, 200
-  tracks per page. Tap to insert after the current track and play immediately;
-  the rest of the queue stays. The row menu offers Play Next, Add to Queue, and
-  Download.
+  tracks per page; pull down or use Refresh to reload. Tap to insert after the
+  current track and play immediately; the rest of the queue stays. The row
+  menu offers Play Next, Add to Queue, and Download.
 - **Queue:** This Phone has individual entry identities, including duplicates;
-  use each row's menu to move up/down, download, or remove from the queue.
-  Clear asks before stopping playback. Server is read-only; selecting an entry
+  use each row's menu to move up/down, download, or remove from the queue;
+  rows show their durations. Clear asks before stopping playback. Server is
+  read-only; pull down or use Refresh to reload it, and selecting an entry
   copies that queue and starts there on the phone. A revision change during
   pagination retries the snapshot once instead of mixing two queues.
 - **Import:** only appears when the server offers yt-dlp. Paste a YouTube URL
@@ -48,17 +49,22 @@ server at 100.64.0.1:8700."
 - **Settings:** server connection/status, **Downloaded** (see
   [Downloads](#downloads)), and third-party licenses.
 
-The mini player opens Now Playing. It offers cover/video, download, seek,
+The mini player shows a thin line along its top edge for how far a file has
+played, and opens Now Playing. It offers cover/video, download, seek,
 previous, play/pause, next, shuffle and repeat. Use the phone's volume buttons
-to adjust volume. Playback controls stay anchored below the artwork and metadata; title
-and subtitle each reserve two lines, with longer text ellipsized. Artwork shrinks
-on shorter screens; with large system text, its section can scroll while the
-playback controls remain visible. Shuffle preserves the
-visible order and visits every queue entry once per pass. Play Next takes
+to adjust volume. Playback controls stay anchored below the artwork and
+metadata; title and subtitle each reserve two lines, with longer text
+ellipsized. Artwork shrinks on shorter screens and shows a wide cover whole,
+while list rows crop covers to rounded squares; with large system text, the
+artwork section can scroll while the playback controls remain visible.
+Shuffle preserves the visible order and visits every queue entry once per
+pass. Play Next takes
 priority even during shuffle. Repeat cycles off/all/one; repeat-one affects
 natural endings only. Previous restarts a file after three seconds, otherwise
-returns through playback history. The system media controls select the output
-route (for example Bluetooth); there is no Chromecast integration.
+returns through playback history. On Android 14 and later the speaker button
+between shuffle and repeat opens the system's output switcher (for example
+for Bluetooth); on older versions the media notification selects the output.
+There is no Chromecast integration.
 
 Music continues with the app in the background and while the screen is locked.
 The foreground media service owns playback, and the notification/lock screen
@@ -195,8 +201,9 @@ sources are not patched, and lint remains enabled for both modules.
 
 Unit tests use the same JSON fixtures as the iPhone app, plus a deterministic
 queue and HTTP stubs; downloads run against MockWebServer in a temporary
-directory, including cut connections and cancellation. Device tests run against their own synthetic MockWebServer
-inside the emulator, with muted audio. They exercise UI imports, local queues,
+directory, including cut connections and cancellation. Device tests run
+against their own synthetic MockWebServer inside the emulator, with muted
+audio. They exercise UI imports, local queues,
 downloading from the player and playing the file with the server unreachable,
 background playback, radio redirects and disconnect/resume, cancellation during
 station resolution, video suspension/catch-up,

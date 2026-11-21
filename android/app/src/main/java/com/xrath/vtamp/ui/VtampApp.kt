@@ -14,13 +14,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
@@ -170,13 +173,21 @@ fun EmptyState(
     }
 }
 
+/**
+ * A track's cover, or a placeholder. Rows fill their square and crop a wide cover; the player
+ * passes [ContentScale.Fit] to show all of it.
+ */
 @Composable
-fun Cover(track: Track?, app: AppState, modifier: Modifier = Modifier) {
+fun Cover(
+    track: Track?,
+    app: AppState,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+) {
     Box(
-        modifier.background(
-            MaterialTheme.colorScheme.surfaceContainerHighest,
-            RoundedCornerShape(8.dp),
-        ),
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -190,7 +201,8 @@ fun Cover(track: Track?, app: AppState, modifier: Modifier = Modifier) {
         val model =
             kept ?: if (track?.cover != null && app.client != null) app.client.file(track, "cover")
             else null
-        if (model != null) AsyncImage(model, null, Modifier.fillMaxSize())
+        if (model != null)
+            AsyncImage(model, null, Modifier.fillMaxSize(), contentScale = contentScale)
     }
 }
 
@@ -251,11 +263,13 @@ private fun LibraryScreen(
     openDownloads: () -> Unit,
 ) {
     val downloads = LocalDownloads.current
+    var refreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(app.libraryLoading) { if (!app.libraryLoading) refreshing = false }
     Column {
         TopAppBar(
             title = { Text("Library") },
             actions = {
-                IconButton(onClick = { store.search(app.query, app.kind, true) }) {
+                IconButton(onClick = store::refreshLibrary) {
                     Icon(Icons.Default.Refresh, "Refresh Library")
                 }
             },
@@ -290,116 +304,127 @@ private fun LibraryScreen(
         // An empty list explains a failure itself; a banner covers a failed later page.
         if (app.library.isNotEmpty())
             app.libraryError?.let { ErrorMessage(it, { store.search(app.query, app.kind, true) }) }
-        LazyColumn(Modifier.fillMaxSize()) {
-            if (app.client == null && app.connecting)
-                item {
-                    Box(
-                        Modifier.fillMaxWidth().padding(24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = {
+                if (app.client != null) {
+                    refreshing = true
+                    store.refreshLibrary()
                 }
-            else if (app.library.isEmpty() && !app.libraryLoading)
-                item {
-                    // Before a first answer, a failure is the connection's.
-                    val error =
-                        app.libraryError
-                            ?: app.connectionError?.takeIf { app.client == null }
-                    when {
-                        app.client == null && error == null ->
-                            EmptyState(
-                                "Connect to your music",
-                                "Add your vtamp server in Settings.",
-                            ) {
-                                if (downloads.items.isNotEmpty())
-                                    FilledTonalButton(onClick = openDownloads) {
-                                        Text("Play Downloaded Tracks")
-                                    }
-                            }
-                        error != null ->
-                            EmptyState(
-                                "Cannot load the Library",
-                                error,
-                                Icons.Default.CloudOff,
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            if (app.client == null) store.connect(app.address)
-                                            else store.search(app.query, app.kind, true)
-                                        }
-                                    ) {
-                                        Text("Retry")
-                                    }
-                                    // Downloaded tracks play without the server.
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (app.client == null && app.connecting)
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                else if (app.library.isEmpty() && !app.libraryLoading)
+                    item {
+                        // Before a first answer, a failure is the connection's.
+                        val error =
+                            app.libraryError
+                                ?: app.connectionError?.takeIf { app.client == null }
+                        when {
+                            app.client == null && error == null ->
+                                EmptyState(
+                                    "Connect to your music",
+                                    "Add your vtamp server in Settings.",
+                                ) {
                                     if (downloads.items.isNotEmpty())
                                         FilledTonalButton(onClick = openDownloads) {
                                             Text("Play Downloaded Tracks")
                                         }
                                 }
-                            }
-                        else ->
-                            EmptyState(
-                                "No tracks found",
-                                "Try another search or add music on your server.",
-                            )
-                    }
-                }
-            items(app.library, key = { it.id }) { track ->
-                var menu by remember { mutableStateOf(false) }
-                TrackRow(
-                    track,
-                    app,
-                    onClick = { playback?.playNow(track) },
-                    trailing = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                timeText(track.durationMs),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Box {
-                                IconButton(onClick = { menu = true }) {
-                                    Icon(Icons.Default.MoreVert, "Actions for ${track.title}")
+                            error != null ->
+                                EmptyState(
+                                    "Cannot load the Library",
+                                    error,
+                                    Icons.Default.CloudOff,
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                if (app.client == null) store.connect(app.address)
+                                                else store.search(app.query, app.kind, true)
+                                            }
+                                        ) {
+                                            Text("Retry")
+                                        }
+                                        // Downloaded tracks play without the server.
+                                        if (downloads.items.isNotEmpty())
+                                            FilledTonalButton(onClick = openDownloads) {
+                                                Text("Play Downloaded Tracks")
+                                            }
+                                    }
                                 }
-                                DropdownMenu(menu, { menu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Play Next") },
-                                        onClick = {
-                                            playback?.add(track, true)
-                                            menu = false
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Add to Queue") },
-                                        onClick = {
-                                            playback?.add(track, false)
-                                            menu = false
-                                        },
-                                    )
-                                    DownloadMenuItems(track, app, store) { menu = false }
-                                }
-                            }
+                            else ->
+                                EmptyState(
+                                    "No tracks found",
+                                    "Try another search or add music on your server.",
+                                )
                         }
-                    },
-                )
+                    }
+                items(app.library, key = { it.id }) { track ->
+                    var menu by remember { mutableStateOf(false) }
+                    TrackRow(
+                        track,
+                        app,
+                        onClick = { playback?.playNow(track) },
+                        trailing = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    timeText(track.durationMs),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                Box {
+                                    IconButton(onClick = { menu = true }) {
+                                        Icon(Icons.Default.MoreVert, "Actions for ${track.title}")
+                                    }
+                                    DropdownMenu(menu, { menu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Play Next") },
+                                            onClick = {
+                                                playback?.add(track, true)
+                                                menu = false
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Add to Queue") },
+                                            onClick = {
+                                                playback?.add(track, false)
+                                                menu = false
+                                            },
+                                        )
+                                        DownloadMenuItems(track, app, store) { menu = false }
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+                if (app.libraryLoading && !refreshing)
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                if (app.library.size < app.total && !app.libraryLoading)
+                    item {
+                        LaunchedEffect(app.library.size) { store.moreLibrary() }
+                        TextButton(onClick = store::moreLibrary, Modifier.fillMaxWidth()) {
+                            Text("Load more")
+                        }
+                    }
             }
-            if (app.libraryLoading)
-                item {
-                    Box(
-                        Modifier.fillMaxWidth().padding(24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-            if (app.library.size < app.total && !app.libraryLoading)
-                item {
-                    LaunchedEffect(app.library.size) { store.moreLibrary() }
-                    TextButton(onClick = store::moreLibrary, Modifier.fillMaxWidth()) {
-                        Text("Load more")
-                    }
-                }
         }
     }
 }
@@ -439,47 +464,55 @@ private fun QueueScreen(
         }
         if (server) {
             app.queueError?.let { ErrorMessage(it, store::loadQueue) }
-            LazyColumn {
-                item {
-                    Text(
-                        "Tap an entry to copy the server queue to this phone. Server playback stays independent.",
-                        Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                app.serverNow?.let { now ->
+            PullToRefreshBox(
+                isRefreshing = app.queueLoading && app.serverQueue.isNotEmpty(),
+                onRefresh = store::loadQueue,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                LazyColumn(Modifier.fillMaxSize()) {
                     item {
-                        ListItem(
-                            headlineContent = {
-                                Text(now.current?.track?.title ?: "Nothing selected")
-                            },
-                            supportingContent = {
-                                Text(
-                                    "${now.status.replaceFirstChar(Char::uppercase)} on server"
-                                )
+                        Text(
+                            "Tap an entry to copy the server queue to this phone. Server playback stays independent.",
+                            Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    app.serverNow?.let { now ->
+                        item {
+                            ListItem(
+                                headlineContent = {
+                                    Text(now.current?.track?.title ?: "Nothing selected")
+                                },
+                                supportingContent = {
+                                    Text(
+                                        "${now.status.replaceFirstChar(Char::uppercase)} on server"
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    // The first load; a refresh shows the pull indicator instead.
+                    if (app.queueLoading && app.serverQueue.isEmpty())
+                        item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    if (!app.queueLoading && app.serverQueue.isEmpty())
+                        item {
+                            EmptyState(
+                                "The server queue is empty",
+                                "Add tracks using vtamp on your server.",
+                                Icons.AutoMirrored.Filled.QueueMusic,
+                            )
+                        }
+                    itemsIndexed(app.serverQueue, key = { _, item -> item.id }) { index, entry ->
+                        TrackRow(
+                            entry.track,
+                            app,
+                            entry.id == app.serverNow?.current?.id,
+                            onClick = {
+                                playback?.replace(app.serverQueue.map { it.track }, index)
+                                server = false
                             },
                         )
                     }
-                }
-                if (app.queueLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                if (!app.queueLoading && app.serverQueue.isEmpty())
-                    item {
-                        EmptyState(
-                            "The server queue is empty",
-                            "Add tracks using vtamp on your server.",
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                        )
-                    }
-                itemsIndexed(app.serverQueue, key = { _, item -> item.id }) { index, entry ->
-                    TrackRow(
-                        entry.track,
-                        app,
-                        entry.id == app.serverNow?.current?.id,
-                        onClick = {
-                            playback?.replace(app.serverQueue.map { it.track }, index)
-                            server = false
-                        },
-                    )
                 }
             }
         } else
@@ -500,38 +533,44 @@ private fun QueueScreen(
                         entry.id == s.currentId,
                         onClick = { playback?.select(entry.id) },
                         trailing = {
-                            Box {
-                                IconButton(onClick = { menu = true }) {
-                                    Icon(
-                                        Icons.Default.MoreVert,
-                                        "Queue actions for ${entry.track.title}",
-                                    )
-                                }
-                                DropdownMenu(menu, { menu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Move Up") },
-                                        enabled = index > 0,
-                                        onClick = {
-                                            playback?.move(entry.id, index - 1)
-                                            menu = false
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Move Down") },
-                                        enabled = index < s.entries.lastIndex,
-                                        onClick = {
-                                            playback?.move(entry.id, index + 1)
-                                            menu = false
-                                        },
-                                    )
-                                    DownloadMenuItems(entry.track, app, store) { menu = false }
-                                    DropdownMenuItem(
-                                        text = { Text("Remove from Queue") },
-                                        onClick = {
-                                            playback?.remove(entry.id)
-                                            menu = false
-                                        },
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    timeText(entry.track.durationMs),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                Box {
+                                    IconButton(onClick = { menu = true }) {
+                                        Icon(
+                                            Icons.Default.MoreVert,
+                                            "Queue actions for ${entry.track.title}",
+                                        )
+                                    }
+                                    DropdownMenu(menu, { menu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Move Up") },
+                                            enabled = index > 0,
+                                            onClick = {
+                                                playback?.move(entry.id, index - 1)
+                                                menu = false
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Move Down") },
+                                            enabled = index < s.entries.lastIndex,
+                                            onClick = {
+                                                playback?.move(entry.id, index + 1)
+                                                menu = false
+                                            },
+                                        )
+                                        DownloadMenuItems(entry.track, app, store) { menu = false }
+                                        DropdownMenuItem(
+                                            text = { Text("Remove from Queue") },
+                                            onClick = {
+                                                playback?.remove(entry.id)
+                                                menu = false
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         },
@@ -566,48 +605,63 @@ private fun MiniPlayer(
     open: () -> Unit,
 ) {
     Surface(Modifier.testTag("miniPlayer"), tonalElevation = 3.dp) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Column {
+            // How far the current file has played; a radio channel has no position.
+            val duration = s.duration
+            if (s.current?.live != true && duration != null && duration > 0)
+                LinearProgressIndicator(
+                    progress = { (s.position.toFloat() / duration).coerceIn(0f, 1f) },
+                    modifier =
+                        Modifier.fillMaxWidth().height(2.dp).semantics {
+                            hideFromAccessibility()
+                        },
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
+                )
+            else Spacer(Modifier.height(2.dp))
             Row(
-                Modifier.weight(1f).clickable(onClick = open).padding(vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Cover(s.current, app, Modifier.size(44.dp))
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        s.current?.title.orEmpty(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        s.current?.subtitle.orEmpty(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                Row(
+                    Modifier.weight(1f).clickable(onClick = open).padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Cover(s.current, app, Modifier.size(44.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            s.current?.title.orEmpty(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            s.current?.subtitle.orEmpty(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
-            }
-            IconButton(
-                onClick = playback::toggle,
-                modifier =
-                    Modifier.semantics {
-                        contentDescription = if (s.playing) "Pause" else "Play"
-                    },
-            ) {
-                if (s.buffering)
-                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else
-                    Icon(
-                        if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        if (s.playing) "Pause" else "Play",
-                    )
-            }
-            IconButton(onClick = { playback.next() }, enabled = s.hasNext) {
-                Icon(Icons.Default.SkipNext, "Next")
+                IconButton(
+                    onClick = playback::toggle,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription = if (s.playing) "Pause" else "Play"
+                        },
+                ) {
+                    if (s.buffering)
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    else
+                        Icon(
+                            if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (s.playing) "Pause" else "Play",
+                        )
+                }
+                IconButton(onClick = { playback.next() }, enabled = s.hasNext) {
+                    Icon(Icons.Default.SkipNext, "Next")
+                }
             }
         }
     }

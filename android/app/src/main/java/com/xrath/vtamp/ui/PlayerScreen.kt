@@ -4,6 +4,8 @@ package com.xrath.vtamp.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.media.MediaRouter2
+import android.os.Build
 import android.view.LayoutInflater
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -20,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -250,12 +253,18 @@ fun PlayerScreen(
                                 if (s.shuffle) "Shuffle on" else "Shuffle off",
                             )
                         }
-                        Text(
-                            "Media output in system controls",
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Center,
-                        )
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            // Android 14 opens its output switcher for an app; older versions
+                            // keep it in the media notification.
+                            if (Build.VERSION.SDK_INT >= 34)
+                                IconButton(
+                                    onClick = {
+                                        MediaRouter2.getInstance(context).showSystemOutputSwitcher()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.SpeakerGroup, "Audio output")
+                                }
+                        }
                         IconButton(onClick = playback::repeat) {
                             Icon(
                                 if (s.repeat == Repeat.ONE) Icons.Default.RepeatOne
@@ -319,7 +328,8 @@ private fun Artwork(
     val video by playback.video.state.collectAsStateWithLifecycle()
     val show = track?.video == true && app.video
     Box(modifier, contentAlignment = Alignment.Center) {
-        if (!show || video.error != null) Cover(track, app, Modifier.fillMaxSize())
+        if (!show || video.error != null)
+            Cover(track, app, Modifier.fillMaxSize(), ContentScale.Fit)
         else {
             // AndroidView's factory is not rerun when a remembered value changes.
             // Replace the composition as well as its surface on each queue entry.
@@ -343,7 +353,7 @@ private fun Artwork(
                             null,
                             Modifier.fillMaxSize().background(Color.Black),
                         )
-                    } ?: Cover(track, app, Modifier.fillMaxSize())
+                    } ?: Cover(track, app, Modifier.fillMaxSize(), ContentScale.Fit)
                 }
                 DisposableEffect(surface, lifecycle, show) {
                     val observer = LifecycleEventObserver { _, event ->

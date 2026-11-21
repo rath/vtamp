@@ -160,6 +160,15 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
         }
     }
 
+    /** Reload the first page without emptying the list first, for pull to refresh. */
+    fun refreshLibrary() {
+        val c = state.value.client ?: return
+        searchJob?.cancel()
+        searchGeneration++
+        val token = searchGeneration
+        searchJob = scope.launch { loadLibrary(c, token, 0) }
+    }
+
     fun moreLibrary() {
         val s = state.value
         val c = s.client ?: return
