@@ -3,7 +3,7 @@
 A native Kotlin / Jetpack Compose app for Android 10 and later phones. It
 browses your vtamp Library and plays its files on the phone, with its own
 queue. It never changes the server's playback or Queue. The server and app
-use HTTP protocol **14**; the Android app version is independently **0.1.0**.
+use HTTP protocol **14**; the Android app version is independently **0.2.0**.
 
 ## Connect
 

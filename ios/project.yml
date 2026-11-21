@@ -13,8 +13,8 @@ settings:
     CODE_SIGN_STYLE: Automatic
     "CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]": "NO"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
   Vtamp:
     type: application
