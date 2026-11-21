@@ -232,9 +232,20 @@ final class VideoRenderer: VideoSink {
             #if VTAMP_VP9
             return DecodedFrameSource(file: file, decoder: try VP9Decoder())
             #else
-            throw VideoError.missingDecoder(codec.name)
+            throw VideoError.missingDecoder(codec.name, library: "libvpx")
             #endif
-        case .av1, .h264, .hevc:
+        case .av1:
+            // The hardware decoder where there is one (A17 Pro, M3, and later),
+            // else dav1d in software.
+            if let format = try? VideoFormat.description(for: file.track), VideoFormat.canDecode(format) {
+                return CompressedFrameSource(file: file, format: format)
+            }
+            #if VTAMP_DAV1D
+            return DecodedFrameSource(file: file, decoder: try AV1Decoder(codecPrivate: file.track.codecPrivate))
+            #else
+            throw VideoError.missingDecoder(codec.name, library: "dav1d")
+            #endif
+        case .h264, .hevc:
             let format = try VideoFormat.description(for: file.track)
             guard VideoFormat.canDecode(format) else { throw VideoError.unsupportedCodec(codec.name) }
             return CompressedFrameSource(file: file, format: format)

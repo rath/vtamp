@@ -34,3 +34,13 @@ ffmpeg -f lavfi -i testsrc2=size=64x64:rate=10 -t 2 -c:v libx264 -g 10 -bf 0 -pi
 ffmpeg -f lavfi -i testsrc2=size=64x64:rate=10 -t 2 -c:v libsvtav1 -preset 12 -g 10 -pix_fmt yuv420p -an -f matroska video-av1.mkv
 ffmpeg -f lavfi -i testsrc2=size=64x64:rate=10 -t 2 -c:v libvpx-vp9 -g 10 -b:v 100k -row-mt 1 -pix_fmt yuv420p -an -f matroska video-vp9.mkv
 ```
+
+`video-av1-hdr.mkv` is the same pattern as 10-bit AV1 whose sequence header
+names BT.2020 primaries and matrix and the PQ transfer function, limited range.
+It checks the iPhone app's software AV1 path for HDR sidecars. The color
+parameters are passed to SVT-AV1 directly, because the stream-level options
+alone leave the primaries and transfer unset:
+
+```sh
+ffmpeg -f lavfi -i testsrc2=size=64x64:rate=10 -t 2 -c:v libsvtav1 -preset 12 -g 10 -pix_fmt yuv420p10le -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -svtav1-params color-primaries=9:transfer-characteristics=16:matrix-coefficients=9 -an -f matroska video-av1-hdr.mkv
+```

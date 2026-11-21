@@ -3,6 +3,7 @@ import SwiftUI
 /// The notices of the open-source code built into the app.
 struct LicensesView: View {
     private static let notices: [(name: String, license: String, file: String)] = [
+        ("dav1d", "BSD-2-Clause", "dav1d"),
         ("libvpx", "BSD-3-Clause", "libvpx"),
     ]
 

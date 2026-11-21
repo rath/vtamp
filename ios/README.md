@@ -71,11 +71,14 @@ A track with a saved video (`· VIDEO` in the TUI) shows its picture in the Now
 Playing sheet in place of the cover, in step with the audio; the **Cover** /
 **Video** button under it switches, and the choice is kept like the TUI's `w`.
 The app reads the server's `video.mkv` sidecar as it is: a Matroska demuxer in
-the app feeds the stored AV1, H.264, or HEVC samples to the iPhone's hardware
-decoder, so nothing is re-encoded or remuxed. AV1 needs an iPhone 15 Pro or
-later; on other phones the cover stays with a notice. VP9 sidecars decode in
-software through libvpx when the app is built with it (see [VP9 with
-libvpx](#vp9-with-libvpx)); without that build they show the cover and a notice.
+the app feeds the stored AV1, H.264, or HEVC samples to the device's hardware
+decoder, so nothing is re-encoded or remuxed. AV1 has a hardware decoder from
+the A17 Pro and M3 on (iPhone 15 Pro and later, recent iPads); elsewhere, such
+as an iPad (10th generation), AV1 decodes in software through dav1d when the
+app is built with it (see [AV1 with dav1d](#av1-with-dav1d)). VP9 sidecars
+decode in software through libvpx when the app is built with it (see [VP9 with
+libvpx](#vp9-with-libvpx)). Without the decoder a sidecar needs, the cover
+stays with a notice under the title.
 Tapping the picture, or its corner button, shows it over the whole screen and
 turns the phone to landscape; a tap shows the controls, and the **X** returns
 to the portrait player. Video decodes only while the player or the full-screen
@@ -158,6 +161,34 @@ display layer shows; 480p costs a few percent of one core.
 libvpx is BSD-3-Clause. Its notice is shown under **Settings → Licenses**
 (`Sources/App/Licenses/libvpx.txt`) and must travel with any copy of the app,
 and the `PATENTS` grant lands next to the build in `Vendor/libvpx/`.
+
+### AV1 with dav1d
+
+Most YouTube imports save AV1, which only the A17 Pro, M3, and later chips
+decode in hardware. On other iPhones and iPads the app decodes AV1 with
+[dav1d](https://code.videolan.org/videolan/dav1d), VideoLAN's AV1 decoder,
+compiled into the app; a device with the hardware decoder keeps using it.
+The build needs meson and ninja (`brew install meson ninja`):
+
+```sh
+ios/scripts/build-dav1d.sh
+xcodegen generate --spec ios/project.yml
+```
+
+The script clones dav1d at the pinned tag (`1.5.5`, commit checked), builds it
+as a static library for the iPhone and the Apple-silicon simulator with 8- and
+10-bit support and no tools, and writes the headers, a module map, and
+`Vendor/dav1d/dav1d.xcconfig`. Each decoder's xcconfig defines namespaced
+settings (`VTAMP_VPX_*`, `VTAMP_DAV1D_*`) that `Signing.xcconfig` joins, so
+both can be present; rerun `build-libvpx.sh` if its xcconfig predates them.
+Without the build the app still compiles and its tests pass, with the AV1
+software tests reported as skipped. dav1d runs on a background actor with two
+threads. 8-bit pictures are copied into NV12 buffers; 10-bit ones go into the
+10-bit biplanar format with their BT.2020 and PQ or HLG color description, so
+an HDR sidecar keeps its colors.
+
+dav1d is BSD-2-Clause. Its notice is shown under **Settings → Licenses**
+(`Sources/App/Licenses/dav1d.txt`) and must travel with any copy of the app.
 
 ## Build
 
@@ -268,7 +299,7 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/Model` | Library, Queue, and import types; time parsing |
 | `Sources/Player` | Queue and transport, AVPlayer engine, audio session, lock-screen controls, artwork cache |
 | `Sources/Downloads` | Tracks kept on the phone: the index, the files, and the download transfers |
-| `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the renderer that follows the audio clock |
+| `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the software VP9 and AV1 decoders, the renderer that follows the audio clock |
 | `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings, Downloaded |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
 | `screenshots` | The app screenshots shown in the main README |

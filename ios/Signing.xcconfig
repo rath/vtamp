@@ -4,5 +4,14 @@
 // as target settings in project.yml, which would take precedence over both.
 PRODUCT_BUNDLE_IDENTIFIER = com.xrath.vtamp.ios
 #include? "Local.xcconfig"
-// libvpx for VP9 sidecars, built by ios/scripts/build-libvpx.sh; absent until then.
+// Software decoders, each absent until its script has run: libvpx for VP9
+// (ios/scripts/build-libvpx.sh) and dav1d for AV1 without a hardware decoder
+// (ios/scripts/build-dav1d.sh). Each defines namespaced settings, joined here
+// so the two can be present together.
 #include? "Vendor/libvpx/libvpx.xcconfig"
+#include? "Vendor/dav1d/dav1d.xcconfig"
+SWIFT_INCLUDE_PATHS = $(inherited) $(VTAMP_VPX_INCLUDE) $(VTAMP_DAV1D_INCLUDE)
+HEADER_SEARCH_PATHS = $(inherited) $(VTAMP_VPX_INCLUDE) $(VTAMP_DAV1D_INCLUDE)
+LIBRARY_SEARCH_PATHS = $(inherited) $(VTAMP_VPX_LIBS) $(VTAMP_DAV1D_LIBS)
+OTHER_LDFLAGS = $(inherited) $(VTAMP_VPX_LDFLAGS) $(VTAMP_DAV1D_LDFLAGS)
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(VTAMP_VPX_CONDITIONS) $(VTAMP_DAV1D_CONDITIONS)

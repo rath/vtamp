@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- The iPhone app decodes AV1 saved videos in software with dav1d on devices
+  without an AV1 hardware decoder (before the A17 Pro and M3, such as the
+  iPad (10th generation)), including 10-bit HDR sidecars. Devices with the
+  hardware decoder keep using it. Build it with `ios/scripts/build-dav1d.sh`;
+  its BSD-2-Clause notice is under Settings → Licenses.
+
+### Changed
+
+- The iPhone app's software decoders define namespaced build settings that
+  `ios/Signing.xcconfig` joins; rerun `ios/scripts/build-libvpx.sh` once if
+  VP9 stops decoding after updating.
+
 ## [0.6.0] — 2026-11-21
 
 Folder tracks can be moved to the system Trash from the TUI or the CLI, and the

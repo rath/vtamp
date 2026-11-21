@@ -43,6 +43,8 @@ targets:
         buildPhase: resources
       - path: ../tests/fixtures/video-av1.mkv
         buildPhase: resources
+      - path: ../tests/fixtures/video-av1-hdr.mkv
+        buildPhase: resources
       - path: ../tests/fixtures/video-vp9.mkv
         buildPhase: resources
     dependencies:
