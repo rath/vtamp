@@ -52,10 +52,11 @@ page never collapses the revealed history; a failed page keeps its cursor and
 shows Retry. Server changes discard the old history and pending replies. The
 server retains 100 terminal reports and at most 32 queued/running jobs.
 
-Choosing a track to play, or tapping the bar above the tabs, opens the
-player: the cover (or the saved video) over the cover's blurred colors, the
-title, the download button, the position slider, previous, play or pause, and
-next, the output volume, and shuffle and repeat either side of an AirPlay button. Shuffle plays
+The bar above the tabs shows the current track, with a thin line along its
+top edge for how far a file has played. Choosing a track to play, or tapping
+that bar, opens the player: the cover (or the saved video) over the cover's
+blurred colors, the title, the download button, the position slider,
+previous, play or pause, and next, the output volume, and shuffle and repeat either side of an AirPlay button. Shuffle plays
 every entry of the phone's queue once per pass in a random order while the
 Queue tab keeps the shown order; repeat cycles off, all, one, and repeat-one
 applies to natural endings only, as in the TUI. Both are kept across launches.

@@ -60,8 +60,31 @@ struct MiniPlayer: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(.bar)
-                .overlay(alignment: .top) { Divider() }
+                .overlay(alignment: .top) {
+                    ZStack(alignment: .topLeading) {
+                        Divider()
+                        PositionLine()
+                    }
+                }
             }
+        }
+    }
+}
+
+/// How far the current file has played, as a hairline along the mini
+/// player's top edge. A radio channel has no position to show.
+private struct PositionLine: View {
+    @Environment(Player.self) private var player
+
+    var body: some View {
+        if !player.isLive, let duration = player.duration, duration > 0 {
+            GeometryReader { proxy in
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: proxy.size.width * min(max(player.position / duration, 0), 1))
+            }
+            .frame(height: 2)
+            .accessibilityHidden(true)
         }
     }
 }
