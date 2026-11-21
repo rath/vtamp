@@ -270,14 +270,20 @@ A server without an audio device casts an Ogg Opus stream that listeners pull wi
 ### iPhone app
 
 <p align="center">
-  <img src="ios/screenshots/library.webp" width="260" alt="The iPhone app's Library tab, listing the server's tracks with their covers.">
-  <img src="ios/screenshots/now-playing.webp" width="260" alt="The iPhone app's player, with the track's cover, the Video switch, the position slider, and playback controls.">
-  <img src="ios/screenshots/queue-server.webp" width="260" alt="The iPhone app's Queue tab showing the server's Queue and the track the server is on.">
+  <img src="ios/screenshots/library.webp" width="260" alt="The iPhone app's Library tab, listing the server's tracks with their covers, video marks, and gray download marks on downloaded tracks.">
+  <img src="ios/screenshots/now-playing.webp" width="260" alt="The iPhone app's player showing a track's saved video, with the Cover switch, the download button, the position slider, and playback controls.">
+  <img src="ios/screenshots/downloads.webp" width="260" alt="The iPhone app's Downloaded screen under Settings, listing the downloaded tracks with their sizes and Play, Shuffle, and Remove All.">
 </p>
 
 [`ios/`](ios/README.md) holds a SwiftUI app for the HTTP API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video plays in step with the audio, read from the server's Matroska sidecar without re-encoding, and tracks downloaded from the player play without the server. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps and the codec limits.
 
 ### Android app
+
+<p align="center">
+  <img src="android/screenshots/library.webp" width="260" alt="The Android app's Library, with search, type filters, album covers, video marks, and gray download marks on downloaded tracks.">
+  <img src="android/screenshots/now-playing.webp" width="260" alt="The Android app's player showing a track's saved video, with the Cover switch, the download button, the position slider, and playback controls.">
+  <img src="android/screenshots/downloads.webp" width="260" alt="The Android app's Downloaded screen under Settings, listing the downloaded tracks with their sizes and Play, Shuffle, and Remove All.">
+</p>
 
 [`android/`](android/README.md) provides a Kotlin / Jetpack Compose client for Android 10 and later. It connects to the same HTTP API, browses the Library, keeps a separate phone queue, starts imports, and plays files, live radio, and saved video with background playback, media notifications, and lock-screen controls; tracks downloaded from the player play without the server. Build and install the APK with the [instructions and codec details](android/README.md).
 

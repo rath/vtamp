@@ -84,6 +84,18 @@ vtamp server start --remote /tmp/music-box.sock</code></pre>
 <p class="cast-example-foot">Ogg Opus · 48 kHz 스테레오 · 128 kbit/s · 곡 시작, 탐색, 재개마다 새 논리 스트림이 시작됩니다.</p>
 </div>
 </div>
+<div class="apps-feature" aria-labelledby="apps-heading">
+<div>
+<h3 id="apps-heading">휴대폰으로 라이브러리 듣기</h3>
+<p>서버를 <code>--api</code>로 시작하면 iPhone 앱과 Android 앱이 Tailscale 같은 사설 네트워크로 서버에 연결합니다. 앱에서 라이브러리를 둘러보고, 서버의 큐를 확인하고, 서버에서 YouTube 가져오기를 시작할 수 있습니다.</p>
+<p>재생은 휴대폰이 직접 합니다. 휴대폰의 큐로 백그라운드와 잠금 화면에서도 재생하고, 서버의 재생은 그대로 둡니다. 저장된 영상은 오디오에 맞춰 재생되고, 플레이어에서 다운로드한 곡은 서버 없이도 재생됩니다.</p>
+<a class="feature-guide" href="https://github.com/rath/vtamp#iphone-app">휴대폰 앱 빌드하기</a>
+</div>
+<figure class="apps-example">
+<div class="apps-shots"><img src="../screenshots/iphone-now-playing.webp" width="600" height="1304" loading="lazy" decoding="async" alt="iPhone 앱 플레이어. 제목 위에 저장된 공연 영상이 재생되고 아래에 재생 위치 슬라이더와 재생 버튼이 있습니다."><img src="../screenshots/android-library.webp" width="600" height="1300" loading="lazy" decoding="async" alt="Android 앱 라이브러리. 앨범 커버와 영상 표시가 있고, 다운로드한 곡에는 회색 다운로드 표시가 붙어 있습니다."></div>
+<figcaption>왼쪽은 오디오에 맞춰 저장된 영상을 재생하는 iPhone 앱, 오른쪽은 다운로드한 곡을 표시하는 Android 앱의 라이브러리입니다. 둘 다 다크 모드입니다.</figcaption>
+</figure>
+</div>
 <div class="media-feature" aria-labelledby="media-heading">
 <div>
 <h3 id="media-heading">미디어 키와 Now Playing 지원</h3>

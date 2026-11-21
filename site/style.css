@@ -91,9 +91,9 @@ h2 { font-size: clamp(2rem, 3.8vw, 3.4rem); line-height: 1.08; margin-bottom: 1.
 .architecture strong { font-weight: 400; color: var(--green); border: 1px solid #6f8d55; padding: 10px 15px; white-space: nowrap; }
 .connector { height: 1px; background: var(--line); width: 70px; }
 .architecture p { flex-basis: 100%; font-family: 'Space Grotesk', sans-serif; text-align: center; font-size: 12px; margin: 0; }
-.tmux-feature, .media-feature, .cast-feature, .spectrum-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 10%; margin-top: 56px; border-top: 1px solid var(--line); padding-top: 36px; }
-.tmux-feature h3, .media-feature h3, .cast-feature h3, .spectrum-feature h3 { font-size: 26px; font-weight: 500; letter-spacing: -.025em; margin-bottom: 18px; }
-.tmux-feature p, .media-feature p, .cast-feature > div > p, .spectrum-feature > div > p { font-size: 14px; color: var(--muted); max-width: 48ch; }
+.tmux-feature, .media-feature, .cast-feature, .apps-feature, .spectrum-feature { display: grid; grid-template-columns: 1fr 1fr; gap: 10%; margin-top: 56px; border-top: 1px solid var(--line); padding-top: 36px; }
+.tmux-feature h3, .media-feature h3, .cast-feature h3, .apps-feature h3, .spectrum-feature h3 { font-size: 26px; font-weight: 500; letter-spacing: -.025em; margin-bottom: 18px; }
+.tmux-feature p, .media-feature p, .cast-feature > div > p, .apps-feature > div > p, .spectrum-feature > div > p { font-size: 14px; color: var(--muted); max-width: 48ch; }
 .tmux-guide, .feature-guide { display: inline-flex; align-items: center; min-height: 44px; color: var(--green); font-size: 14px; }
 .tmux-guide:hover, .feature-guide:hover { color: var(--text); }
 .media-keyboard { margin: 0; align-self: center; min-width: 0; }
@@ -111,11 +111,15 @@ h2 { font-size: clamp(2rem, 3.8vw, 3.4rem); line-height: 1.08; margin-bottom: 1.
 #spectrum-toggle { grid-area: toggle; align-self: start; display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 10px 13px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; }
 #spectrum-toggle:hover { color: var(--text); background: var(--panel); }
 #spectrum-toggle svg { width: 16px; height: 16px; }
-.cast-feature > div > p code { font-size: .95em; color: var(--text); white-space: nowrap; }
+.cast-feature > div > p code, .apps-feature > div > p code { font-size: .95em; color: var(--text); white-space: nowrap; }
 .cast-example { min-width: 0; align-self: center; background: var(--deep); border: 1px solid #303d2c; padding: 20px 22px; }
 .cast-example pre { font-size: 12px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cast-example pre code { color: var(--green); }
 .cast-example-foot { margin: 16px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.apps-example { margin: 0; min-width: 0; max-width: 520px; align-self: center; }
+.apps-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.apps-shots img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 26px; background: #000; }
+.apps-example figcaption { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .tmux-example figure { margin: 0 0 24px; }
 .tmux-status { display: flex; align-items: center; gap: 12px; padding: 16px; background: var(--deep); border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
 .tmux-pane { color: var(--muted); flex-shrink: 0; }
@@ -190,8 +194,8 @@ h2 { font-size: clamp(2rem, 3.8vw, 3.4rem); line-height: 1.08; margin-bottom: 1.
   .lifecycle-step h3 { font-size: 22px; grid-column: 2; margin-bottom: 8px; } .lifecycle-step p { font-size: 13px; max-width: none; }
   .architecture { padding: 20px 10px; gap: 8px; font-size: 8px; margin-top: 35px; } .architecture strong { padding: 9px 7px; font-size: 8px; }
   .connector { width: 15px; } .architecture p { font-size: 11px; margin-top: 7px; }
-  .tmux-feature, .media-feature, .cast-feature, .spectrum-feature { grid-template-columns: 1fr; gap: 24px; margin-top: 36px; padding-top: 28px; }
-  .tmux-feature h3, .media-feature h3, .cast-feature h3, .spectrum-feature h3 { font-size: 24px; }
+  .tmux-feature, .media-feature, .cast-feature, .apps-feature, .spectrum-feature { grid-template-columns: 1fr; gap: 24px; margin-top: 36px; padding-top: 28px; }
+  .tmux-feature h3, .media-feature h3, .cast-feature h3, .apps-feature h3, .spectrum-feature h3 { font-size: 24px; }
   .cast-example { padding: 16px; }
   .tmux-status { gap: 8px; padding: 12px; font-size: 11px; }
   .commands, .install { grid-template-columns: 1fr; gap: 26px; padding-block: 50px; }

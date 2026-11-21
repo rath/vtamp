@@ -84,6 +84,18 @@ vtamp server start --remote /tmp/music-box.sock</code></pre>
 <p class="cast-example-foot">Ogg Opus · 48 kHz stereo · 128 kbit/s · Each track start, seek, and resume begins a new logical stream.</p>
 </div>
 </div>
+<div class="apps-feature" aria-labelledby="apps-heading">
+<div>
+<h3 id="apps-heading">Play the library on your phone.</h3>
+<p>Start the server with <code>--api</code> and the iPhone and Android apps connect to it over a private network such as Tailscale. They browse the Library, show the server’s Queue, and start YouTube imports on the server.</p>
+<p>The phone plays the tracks itself, with its own queue, in the background and from the lock screen; the server’s playback stays as it is. Saved videos play in step with the audio, and tracks downloaded from the player play without the server.</p>
+<a class="feature-guide" href="https://github.com/rath/vtamp#iphone-app">Build the phone apps</a>
+</div>
+<figure class="apps-example">
+<div class="apps-shots"><img src="screenshots/iphone-now-playing.webp" width="600" height="1304" loading="lazy" decoding="async" alt="The iPhone app's player showing a saved concert video above the title, the position slider, and playback controls."><img src="screenshots/android-library.webp" width="600" height="1300" loading="lazy" decoding="async" alt="The Android app's Library with album covers, video marks, and gray download marks on the downloaded tracks."></div>
+<figcaption>Left, the iPhone app plays a saved video in step with the audio. Right, the Android app’s Library marks downloaded tracks. Both in dark mode.</figcaption>
+</figure>
+</div>
 <div class="media-feature" aria-labelledby="media-heading">
 <div>
 <h3 id="media-heading">Your Mac knows what’s playing.</h3>

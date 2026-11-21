@@ -302,7 +302,7 @@ mutes playback so the simulator does not play through the Mac.
 | `Sources/Video` | Matroska demuxer over HTTP ranges, VideoToolbox formats, the software VP9 and AV1 decoders, the renderer that follows the audio clock |
 | `Sources/Views` | Library, Queue, Now Playing (with the video surface and its full-screen view), Import, Settings, Downloaded |
 | `Tests`, `UITests` | Unit tests with fixtures; the server-driven UI test |
-| `screenshots` | The app screenshots shown in the main README |
+| `screenshots` | The app screenshots shown in the main README; the player also appears on the website |
 
 The app icon sets the icon's 9 × 9 cell grid on dark gray with margins, without
 the macOS icon's tile. `scripts/build-icons.py` draws it from `assets/icon.svg`;
