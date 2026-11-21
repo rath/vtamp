@@ -2,10 +2,61 @@
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-21
+
+Folder tracks can be moved to the system Trash from the TUI or the CLI, and the
+iPhone and Android apps download tracks from the player and play them without
+the server.
+
+### Added
+
+- `vtamp library trash TRACK_ID`, and `d` or `x` on a folder track in the TUI
+  Library, move that track's original audio file to the server user's system
+  Trash (macOS or FreeDesktop). The TUI asks first and shows the title and the
+  file path; the CLI does not ask. Queued copies are removed with it, the
+  folder and its other files stay, and a move interrupted by a crash completes
+  at the next start. Moving the file back and rescanning registers it again.
+- The iPhone and Android apps keep tracks on the phone. The download button in
+  the player saves the current track's audio and cover, rows mark downloaded
+  tracks, and row menus offer Download, Cancel Download, and Remove Download.
+  A downloaded track plays from its file with or without the server. Settings
+  → Downloaded plays the downloaded tracks (Play, Shuffle, or from a chosen
+  track) and removes one or all of them, and Play Downloaded Tracks appears
+  when the Library cannot load. Saved videos are not downloaded.
+- The apps' mini players show how far a file has played as a thin line.
+- The Android app refreshes the Library and the server's Queue when pulled
+  down, and on Android 14 and later its player opens the system's output
+  switcher.
+
 ### Changed
 
 - The icon is a play triangle drawn as a 9 × 9 grid of terminal cells. It replaces
   the V-meter on macOS, the website, and in the iPhone and Android apps.
+- The apps mark tracks with a saved video with a small gray video icon instead
+  of a VIDEO label.
+- Android list rows crop covers to rounded squares and show durations in the
+  phone's queue too; the player still shows a wide cover whole.
+
+### Fixed
+
+- In the TUI Library, `j`/`k`, the arrows, PageUp/PageDown, and Ctrl-B/F move
+  across page boundaries, loading the page they reach, and continuous scrolling
+  keeps the shown rows and the selection while the next window loads.
+- In the iPhone app, the last list rows no longer end under the mini player,
+  and the connection banner no longer covers the navigation bar's buttons.
+- When the saved server did not answer at launch, the Android app opened on
+  Settings with an empty address and a Retry that did nothing. It now keeps the
+  address and opens on the Library with Retry, and connection failures read as
+  sentences such as "Cannot reach the server at 100.64.0.1:8700."
+
+### Upgrade notes
+
+- The protocol stays at version 15, the database at version 9, and Library
+  archives at format version 3, so 0.5.4 clients and apps keep working. Stop an
+  older server with `vtamp server stop` and start the new one to get
+  `library trash`.
+- The iPhone and Android apps are version 0.3.0. Rebuild and reinstall them for
+  downloads; see `ios/README.md` and `android/README.md`.
 
 ## [0.5.4] — 2026-11-15
 
@@ -530,7 +581,8 @@ easier and fixes live-radio media keys and slow LLM CLI startup.
   playback, relay, media keys, or radio. Intel Macs and other Linux architectures
   build from source.
 
-[Unreleased]: https://github.com/rath/vtamp/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/rath/vtamp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rath/vtamp/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/rath/vtamp/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/rath/vtamp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/rath/vtamp/compare/v0.5.1...v0.5.2
