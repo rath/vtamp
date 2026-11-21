@@ -275,11 +275,11 @@ A server without an audio device casts an Ogg Opus stream that listeners pull wi
   <img src="ios/screenshots/queue-server.webp" width="260" alt="The iPhone app's Queue tab showing the server's Queue and the track the server is on.">
 </p>
 
-[`ios/`](ios/README.md) holds a SwiftUI app for the HTTP API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video plays in step with the audio, read from the server's Matroska sidecar without re-encoding. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps and the codec limits.
+[`ios/`](ios/README.md) holds a SwiftUI app for the HTTP API. It browses the Library, shows the server's Queue, starts YouTube imports on the server, and plays the files on the phone with its own queue, in the background and from the lock screen; the server's playback and Queue stay as they are. A track's saved video plays in step with the audio, read from the server's Matroska sidecar without re-encoding, and tracks downloaded from the player play without the server. Build it with Xcode and XcodeGen and install it with your own Apple ID; [ios/README.md](ios/README.md) has the steps and the codec limits.
 
 ### Android app
 
-[`android/`](android/README.md) provides a Kotlin / Jetpack Compose client for Android 10 and later. It connects to the same HTTP API, browses the Library, keeps a separate phone queue, starts imports, and plays files, live radio, and saved video with background playback, media notifications, and lock-screen controls. Build and install the APK with the [instructions and codec details](android/README.md).
+[`android/`](android/README.md) provides a Kotlin / Jetpack Compose client for Android 10 and later. It connects to the same HTTP API, browses the Library, keeps a separate phone queue, starts imports, and plays files, live radio, and saved video with background playback, media notifications, and lock-screen controls; tracks downloaded from the player play without the server. Build and install the APK with the [instructions and codec details](android/README.md).
 
 ## macOS media keys and Now Playing
 

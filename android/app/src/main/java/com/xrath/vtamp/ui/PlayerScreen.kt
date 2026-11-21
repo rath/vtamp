@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.PlayerView
 import com.xrath.vtamp.*
 import com.xrath.vtamp.R
+import com.xrath.vtamp.downloads.DownloadStore
 import com.xrath.vtamp.model.timeText
 import com.xrath.vtamp.playback.*
 
@@ -137,7 +138,15 @@ fun PlayerScreen(
                             ) {
                                 Text(if (app.video) "Cover" else "Video")
                             }
-                        else Spacer(Modifier.width(48.dp))
+                        val track = s.current
+                        if (track != null && DownloadStore.downloadable(track))
+                            DownloadButton(track, app, store)
+                        else if (track?.video != true) Spacer(Modifier.width(48.dp))
+                    }
+                    // The main screen's banners are behind this dialog.
+                    s.error?.let { ErrorMessage(it, playback::dismissError, "Dismiss") }
+                    LocalDownloads.current.error?.let {
+                        ErrorMessage(it, store.downloads::dismissError, "Dismiss")
                     }
                     // Keep transport controls anchored; only artwork/metadata may scroll
                     // when accessibility text or a very short window needs extra room.

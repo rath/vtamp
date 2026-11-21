@@ -43,7 +43,8 @@ vtamp server start --api 100.64.0.1:8800     # explicit address and port
 Two apps use this API: the [iPhone app](../ios/README.md) and the
 [Android app](../android/README.md). Both browse the Library, show the server's
 Queue, start imports, and play tracks, radio, and saved video on the phone with
-their own queue; the server's playback and Queue stay as they are. The
+their own queue; the server's playback and Queue stay as they are. Tracks
+downloaded to a phone play there without the server. The
 [README](../README.md#iphone-app) introduces them.
 
 ## Linux builds are headless servers

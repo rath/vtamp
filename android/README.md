@@ -27,12 +27,13 @@ available. Replies from an old server or search are discarded.
 
 - **Library:** title/artist/album search, All/Audio/Video/Radio filters, 200
   tracks per page. Tap to insert after the current track and play immediately;
-  the rest of the queue stays. The row menu offers Play Next and Add to Queue.
+  the rest of the queue stays. The row menu offers Play Next, Add to Queue, and
+  Download.
 - **Queue:** This Phone has individual entry identities, including duplicates;
-  use each row's menu to move up/down or remove. Clear asks before stopping
-  playback. Server is read-only; selecting an entry copies that queue and
-  starts there on the phone. A revision change during pagination retries the
-  snapshot once instead of mixing two queues.
+  use each row's menu to move up/down, download, or remove from the queue.
+  Clear asks before stopping playback. Server is read-only; selecting an entry
+  copies that queue and starts there on the phone. A revision change during
+  pagination retries the snapshot once instead of mixing two queues.
 - **Import:** only appears when the server offers yt-dlp. Paste a YouTube URL
   with the native text menu, optionally select Whole playlist, Start/End and
   Save video (up to 480p). Times accept seconds, M:SS or H:MM:SS. Successful
@@ -40,11 +41,12 @@ available. Replies from an old server or search are discarded.
   Recent jobs load 20 at a time, with Cancel, Retry and Play. Retry preserves
   the original job's options on the server. Legacy protocol-14 servers use
   their bounded `imports` history instead of the cursor API.
-- **Settings:** server connection/status and third-party licenses.
+- **Settings:** server connection/status, **Downloaded** (see
+  [Downloads](#downloads)), and third-party licenses.
 
-The mini player opens Now Playing. It offers cover/video, seek, previous,
-play/pause, next, shuffle and repeat. Use the phone's volume buttons to adjust
-volume. Playback controls stay anchored below the artwork and metadata; title
+The mini player opens Now Playing. It offers cover/video, download, seek,
+previous, play/pause, next, shuffle and repeat. Use the phone's volume buttons
+to adjust volume. Playback controls stay anchored below the artwork and metadata; title
 and subtitle each reserve two lines, with longer text ellipsized. Artwork shrinks
 on shorter screens; with large system text, its section can scroll while the
 playback controls remain visible. Shuffle preserves the
@@ -61,7 +63,8 @@ app from Recents leaves its service playing. Force Stop, Android's active-app
 Stop, or process termination ends playback. Audio focus handles interruptions;
 headphone disconnection pauses. There is no phone-call permission.
 
-Only the server address, shuffle/repeat settings and Cover/Video choice persist.
+Only the server address, shuffle/repeat settings, Cover/Video choice and
+downloaded tracks persist.
 A new process starts with an empty queue and never starts playback by itself.
 Imports poll while the app is visible, independently of the selected tab (one
 second with live jobs, otherwise ten seconds). Job completion refreshes Library.
@@ -73,7 +76,7 @@ again; refresh recent imports before deciding whether to repeat it.
 
 Files are streamed from track-ID URLs with HTTP Range support. AAC, MP3,
 FLAC, WAV, Ogg Vorbis/Opus use Media3 and platform decoders. ALAC uses the bundled
-FFmpeg decoder. There is no offline download or server loudness correction.
+FFmpeg decoder. There is no server loudness correction.
 Radio connects directly to its registered URL (including HLS), not through the
 server. Each connection resolves redirects and checks the response type and
 final URL before selecting HLS or ordinary audio playback, so station gateway
@@ -107,6 +110,34 @@ player can expand video to landscape. Entering and leaving fullscreen moves
 the existing video view and retains its prepared player and buffered media;
 it does not reopen the source or seek to catch up again. Tablet-specific layouts,
 Android Auto and Picture-in-Picture are not part of this release.
+
+## Downloads
+
+Nothing is downloaded by itself. The download button at the top right of Now
+Playing keeps the current track on the phone: its audio file, its cover, and
+the Library row as the server described it. While the file arrives the button
+shows its progress and a tap cancels; a kept track shows a filled button whose
+menu removes the download. Library and This Phone row menus offer Download,
+Cancel Download, or Remove Download too, and rows mark a kept track with a
+small gray icon next to the duration, or a ring while it downloads. Radio
+channels are not offered.
+
+A downloaded track plays from its file wherever it is played, with or without
+the server, and the media notification uses its saved cover. **Settings →
+Downloaded** lists the kept tracks, newest first, with each size and the
+total: tap one to play the list from there, use **Play** or **Shuffle**, use a
+row's menu for Play Next, Add to Queue, or Remove Download, or **Remove All**.
+Only the audio and the cover are kept, not the saved video: away from the
+server a video track shows its cover. A download is the file as it was; a
+retag or new cover on the server reaches it only after it is removed and
+downloaded again. Downloads stay when the app connects to another server.
+
+A download runs in the app's process, in the foreground or while music plays
+in the background; if Android ends the process, the download stops and can be
+started again. A failed or cancelled transfer leaves no partial file. The
+files live in the app's private storage (`files/downloads`), which is not
+backed up, and stay until they are removed in the app, the app's storage is
+cleared, or the app is uninstalled.
 
 ## Build and install
 
@@ -159,8 +190,10 @@ into the pinned Media3 release's `UnstableApi`; downloaded upstream
 sources are not patched, and lint remains enabled for both modules.
 
 Unit tests use the same JSON fixtures as the iPhone app, plus a deterministic
-queue and HTTP stubs. Device tests run against their own synthetic MockWebServer
+queue and HTTP stubs; downloads run against MockWebServer in a temporary
+directory, including cut connections and cancellation. Device tests run against their own synthetic MockWebServer
 inside the emulator, with muted audio. They exercise UI imports, local queues,
+downloading from the player and playing the file with the server unreachable,
 background playback, radio redirects and disconnect/resume, cancellation during
 station resolution, video suspension/catch-up,
 fullscreen continuity, and actual AAC/ALAC/WAV/H.264/VP9 decoding. They never

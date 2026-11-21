@@ -18,6 +18,8 @@ class TestServer : AutoCloseable {
     val videoRequests = AtomicInteger()
     @Volatile var videoDelayMs = 0L
     @Volatile var radioDelayMs = 0L
+    /** Every connection drops at once, as from a server out of reach. */
+    @Volatile var offline = false
     val radioResolutions = AtomicInteger()
     var submitted: JsonObject? = null
     private var imported = false
@@ -85,6 +87,8 @@ class TestServer : AutoCloseable {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.requestUrl!!.encodedPath
                     requests += "${request.method} $path"
+                    if (offline)
+                        return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
                     return when {
                         path == "/api/server" ->
                             reply(

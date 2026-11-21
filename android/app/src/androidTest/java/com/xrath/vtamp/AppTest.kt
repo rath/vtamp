@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.xrath.vtamp.downloads.DownloadStatus
 import com.xrath.vtamp.playback.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -62,7 +63,10 @@ class AppTest {
                 !store.state.value.connecting &&
                 store.state.value.library.size == 3
         }
-        compose.runOnUiThread { store.preferVideo(true) }
+        compose.runOnUiThread {
+            store.preferVideo(true)
+            store.downloads.removeAll()
+        }
         compose.onAllNodesWithText("Library").onLast().performClick()
     }
 
@@ -70,6 +74,7 @@ class AppTest {
     fun cleanup() {
         compose.runOnUiThread {
             runtime.clear()
+            store.downloads.removeAll()
             store.imports.configure(null, false)
             compose.activity.unbindService(connection)
         }
@@ -109,6 +114,50 @@ class AppTest {
             last.bottom <= mini.top,
         )
         compose.onNodeWithContentDescription("Video", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun downloadPlaysWithoutTheServer() {
+        val tone = server.tracks().first { it.id == "tone" }
+        compose.onNodeWithText("Tone").performClick()
+        compose.waitUntil(10000) { runtime.state.value.position > 500 }
+        compose.onNodeWithContentDescription("Download").performClick()
+        compose.waitUntil(15000) {
+            store.downloads.state.value.status(tone) == DownloadStatus.Downloaded
+        }
+        // The player's button; the Library row behind the dialog has the same mark.
+        compose
+            .onNode(hasContentDescription("Downloaded") and hasAnyAncestor(isDialog()))
+            .assertIsDisplayed()
+        compose.onNodeWithContentDescription("Close player").performClick()
+        // The Library row carries the mark next to its duration.
+        compose
+            .onNodeWithContentDescription("Downloaded", useUnmergedTree = true)
+            .assertIsDisplayed()
+
+        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText("Downloaded").performClick()
+        // The list's row; the mini player shows the same title.
+        compose.onNodeWithContentDescription("Actions for Tone").assertIsDisplayed()
+        compose.onNodeWithText("1 track", substring = true).assertIsDisplayed()
+
+        // Out of reach of the server, the file still plays.
+        server.offline = true
+        compose.runOnUiThread { runtime.clear() }
+        compose.onNodeWithText("Play").performClick()
+        compose.waitUntil(10000) { runtime.state.value.position > 1500 }
+        var scheme: String? = null
+        compose.runOnUiThread {
+            scheme = runtime.audio.currentMediaItem?.localConfiguration?.uri?.scheme
+        }
+        assertEquals("file", scheme)
+
+        compose.onNodeWithText("Remove All").performClick()
+        compose.onNodeWithText("Remove 1 track").performClick()
+        compose.onNodeWithText("No downloads").assertIsDisplayed()
+        assertTrue(store.downloads.state.value.items.isEmpty())
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("None").assertIsDisplayed()
     }
 
     @Test

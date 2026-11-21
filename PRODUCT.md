@@ -98,5 +98,6 @@ Android 10+ phones can browse the private-network HTTP API and play Library
 files locally with a separate queue, background media controls, radio, imports
 and saved video. The Material 3 app follows the iPhone workflows and is built
 as a directly installable APK. ALAC decoding is bundled; video codec support
-depends on the device. No offline download, server playback control, Android
-Auto, Chromecast or tablet-specific layout is included.
+depends on the device. Tracks downloaded from the player play without the
+server. No server playback control, Android Auto, Chromecast or
+tablet-specific layout is included.
