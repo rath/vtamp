@@ -159,19 +159,25 @@ class VideoFollower(
         }
     }
 
-    private fun holdFrame() {
+    /**
+     * Copy the shown frame into [VideoState.still]. [done] runs once the copy has finished or
+     * was never started; the surface must keep its producer until then, because a decoder
+     * leaving the surface (Android 12's BLAST queue) frees the buffer being copied.
+     */
+    private fun holdFrame(shown: PlayerView? = view, done: () -> Unit = {}) {
         val hadFrame = mutable.value.ready
         mutable.update { it.copy(ready = false) }
         val token = ++captureGeneration
         val id = currentId
-        val surface = view?.videoSurfaceView as? SurfaceView ?: return
+        val surface = shown?.videoSurfaceView as? SurfaceView
         if (
-            !hadFrame ||
+            surface == null ||
+                !hadFrame ||
                 !surface.holder.surface.isValid ||
                 surface.width <= 0 ||
                 surface.height <= 0
         )
-            return
+            return done()
         val image = Bitmap.createBitmap(surface.width, surface.height, Bitmap.Config.ARGB_8888)
         try {
             // SurfaceView preserves HDR output. Copy asynchronously instead of reading a
@@ -188,12 +194,14 @@ class VideoFollower(
                     ) {
                         mutable.update { it.copy(still = image) }
                     } else image.recycle()
+                    done()
                 },
                 Handler(Looper.getMainLooper()),
             )
         } catch (_: IllegalArgumentException) {
             // The surface may be destroyed while the activity is being backgrounded.
             image.recycle()
+            done()
         }
     }
 
@@ -212,14 +220,24 @@ class VideoFollower(
     }
 
     fun hide() {
-        if (player != null) holdFrame()
+        val old = player
+        val shown = view
         generation++
         sync?.cancel()
         sync = null
-        view?.player = null
         view = null
-        player?.release()
         player = null
+        if (old == null) {
+            shown?.player = null
+            return
+        }
+        // Stop decoding now, but detach and release only after the frame copy.
+        old.playWhenReady = false
+        holdFrame(shown) {
+            // A newer player may own the view by now; leave it attached.
+            if (shown?.player === old) shown.player = null
+            old.release()
+        }
     }
 
     fun reset() {

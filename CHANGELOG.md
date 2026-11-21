@@ -16,6 +16,12 @@
   `ios/Signing.xcconfig` joins; rerun `ios/scripts/build-libvpx.sh` once if
   VP9 stops decoding after updating.
 
+### Fixed
+
+- On Android 12 and later, turning video off or leaving the player could lose
+  the held video frame and show the cover instead: the player was released
+  before the frame copy finished.
+
 ## [0.6.0] — 2026-11-21
 
 Folder tracks can be moved to the system Trash from the TUI or the CLI, and the
