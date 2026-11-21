@@ -175,18 +175,26 @@ fun TrackRow(
     ListItem(
         headlineContent = { Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Column {
-                if (track.subtitle.isNotEmpty())
-                    Text(track.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (track.video) Text("VIDEO", style = MaterialTheme.typography.labelSmall)
-            }
+            if (track.subtitle.isNotEmpty())
+                Text(track.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         leadingContent = { Cover(track, app, Modifier.size(48.dp)) },
-        trailingContent =
-            trailing
-                ?: {
-                    Text(timeText(track.durationMs), style = MaterialTheme.typography.labelMedium)
-                },
+        trailingContent = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (track.video)
+                    Icon(
+                        Icons.Default.Videocam,
+                        "Video",
+                        Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                if (trailing != null) trailing()
+                else Text(timeText(track.durationMs), style = MaterialTheme.typography.labelMedium)
+            }
+        },
         modifier =
             Modifier.fillMaxWidth().clickable(onClick = onClick).semantics {
                 this.selected = selected
