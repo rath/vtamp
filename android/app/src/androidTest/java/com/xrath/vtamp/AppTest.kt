@@ -94,6 +94,24 @@ class AppTest {
     }
 
     @Test
+    fun queueEndClearsMiniPlayerAndMarksVideo() {
+        val tracks = server.tracks()
+        val tone = tracks.first { it.id == "tone" }
+        val clip = tracks.first { it.id == "clip" }
+        compose.runOnUiThread { runtime.replace(List(20) { tone } + clip, 0) }
+        compose.onNodeWithContentDescription("Close player").performClick()
+        compose.onNodeWithText("Queue").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(20)
+        val last = compose.onNodeWithText("Clip").getBoundsInRoot()
+        val mini = compose.onNodeWithTag("miniPlayer").getBoundsInRoot()
+        assertTrue(
+            "Last row ends at ${last.bottom}, mini player starts at ${mini.top}",
+            last.bottom <= mini.top,
+        )
+        compose.onNodeWithContentDescription("Video", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun sessionTransportAndBackgroundPlayback() {
         compose.runOnUiThread { runtime.playNow(server.tracks().first()) }
         compose.waitUntil(10000) { runtime.state.value.position > 500 }
