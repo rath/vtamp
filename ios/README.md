@@ -192,6 +192,11 @@ TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
 VTAMP_HOME="$vtamp_test_home" target/release/vtamp server stop
 ```
 
+The Queue regression loads the server's Queue onto the phone, scrolls both
+queues to the end, and checks that the last row ends above the mini player.
+It passes trivially on a Queue that fits on one screen, so queue about 20
+entries for it to prove anything.
+
 The background-video regression additionally looks for **Resume Clip**, a
 synthetic video at least 60 seconds long with spaced keyframes (for example,
 H.264 at 30 fps with an eight-second GOP). It backgrounds the player for nine

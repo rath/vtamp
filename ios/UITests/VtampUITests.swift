@@ -89,6 +89,42 @@ final class VtampUITests: XCTestCase {
         XCTAssertTrue(row(app, "어떻게 사랑이 그래요").waitForExistence(timeout: 15), "The Library reloads after the import")
     }
 
+    /// Scrolled to the end, the last queue row sits above the mini player
+    /// rather than under it. Needs a server Queue long enough to scroll.
+    @MainActor
+    func testQueueEndClearsMiniPlayer() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["VTAMP_SERVER"] = server
+        app.launchEnvironment["VTAMP_MUTED"] = "1"
+        app.launch()
+
+        tab(app, "Queue").tap()
+        app.buttons["Server"].tap()
+        let list = app.collectionViews.firstMatch
+        let first = list.buttons.firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 15), "The server's Queue is listed")
+        gap(first).tap()
+        let position = app.sliders["Position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 10), "The player opens on the server entry")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(position.waitForNonExistence(timeout: 5))
+        let mini = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Now Playing:")).firstMatch
+        XCTAssertTrue(mini.waitForExistence(timeout: 5))
+
+        // Both queues: the phone's copy first, then the server's own list.
+        for source in ["This iPhone", "Server"] {
+            app.buttons[source].tap()
+            XCTAssertTrue(list.cells.firstMatch.waitForExistence(timeout: 10))
+            for _ in 0..<6 { list.swipeUp(velocity: .fast) }
+            Thread.sleep(forTimeInterval: 1)
+            let last = try XCTUnwrap(list.cells.allElementsBoundByIndex.max { $0.frame.maxY < $1.frame.maxY })
+            snapshot(app, "queue-end-\(source)")
+            XCTAssertLessThanOrEqual(
+                last.frame.maxY, mini.frame.minY + 1,
+                "\(source): the last row (\(last.label)) ends at \(last.frame.maxY), the mini player starts at \(mini.frame.minY)")
+        }
+    }
+
     /// A track with a saved video shows the picture in the player and
     /// switches back to the cover. Skipped when the server has no `Clip`.
     @MainActor

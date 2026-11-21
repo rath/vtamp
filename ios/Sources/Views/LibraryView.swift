@@ -115,6 +115,7 @@ struct LibraryView: View {
             }
             .listStyle(.plain)
             .overlay { emptyState }
+            .withMiniPlayer()
             .navigationTitle("Library")
             .searchable(text: $model.query, prompt: "Title, artist, album")
             .autocorrectionDisabled()

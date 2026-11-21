@@ -17,14 +17,14 @@ struct RootView: View {
         @Bindable var sheet = sheet
         TabView(selection: $section) {
             Tab("Library", systemImage: "music.note.list", value: .library) {
-                LibraryView().withPlayerChrome()
+                LibraryView().withConnectionBanner()
             }
             Tab("Queue", systemImage: "list.number", value: .queue) {
-                QueueView().withPlayerChrome()
+                QueueView().withConnectionBanner()
             }
             if app.importAvailable {
                 Tab("Import", systemImage: "square.and.arrow.down", value: .imports) {
-                    ImportView().withPlayerChrome()
+                    ImportView().withConnectionBanner()
                 }
             }
             Tab("Settings", systemImage: "gearshape", value: .settings) {
@@ -70,17 +70,20 @@ struct RootView: View {
     }
 }
 
-private struct PlayerChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() }
-            .safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer() }
-    }
-}
-
 extension View {
-    /// The connection banner above and the mini player above the tab bar.
-    func withPlayerChrome() -> some View { modifier(PlayerChrome()) }
+    /// The connection banner above the tab's navigation bar. Apply it outside
+    /// the tab's `NavigationStack`, so the bar and its buttons sit below it.
+    func withConnectionBanner() -> some View {
+        safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() }
+    }
+
+    /// The mini player above the tab bar. Apply it to the scrolling content
+    /// inside the tab's `NavigationStack`: from outside the stack the inset
+    /// never reaches the list's scroll insets, and the last rows end up
+    /// under the mini player.
+    func withMiniPlayer() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer() }
+    }
 }
 
 struct ConnectionBanner: View {

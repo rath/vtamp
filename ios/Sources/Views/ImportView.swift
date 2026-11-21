@@ -106,6 +106,7 @@ struct ImportView: View {
                 if let client = app.client { await imports.refresh(client: client, app: app) }
             }
             .scrollDismissesKeyboard(.interactively)
+            .withMiniPlayer()
             .navigationTitle("Import")
         }
     }

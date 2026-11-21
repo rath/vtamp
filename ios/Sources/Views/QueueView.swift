@@ -53,6 +53,7 @@ struct QueueView: View {
                 case .server: serverQueue
                 }
             }
+            .withMiniPlayer()
             .navigationTitle("Queue")
             .toolbar {
                 ToolbarItem(placement: .principal) {
