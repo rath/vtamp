@@ -115,9 +115,18 @@ final class VtampUITests: XCTestCase {
         for source in ["This iPhone", "Server"] {
             app.buttons[source].tap()
             XCTAssertTrue(list.cells.firstMatch.waitForExistence(timeout: 10))
-            for _ in 0..<6 { list.swipeUp(velocity: .fast) }
-            Thread.sleep(forTimeInterval: 1)
-            let last = try XCTUnwrap(list.cells.allElementsBoundByIndex.max { $0.frame.maxY < $1.frame.maxY })
+            // Swipe until the lowest row stops moving: the end of the list.
+            var lowest = -CGFloat.infinity
+            var lowestRow: XCUIElement?
+            for _ in 0..<20 {
+                list.swipeUp(velocity: .fast)
+                Thread.sleep(forTimeInterval: 1)
+                lowestRow = list.cells.allElementsBoundByIndex.max { $0.frame.maxY < $1.frame.maxY }
+                let maxY = lowestRow?.frame.maxY ?? lowest
+                if abs(maxY - lowest) < 1 { break }
+                lowest = maxY
+            }
+            let last = try XCTUnwrap(lowestRow)
             snapshot(app, "queue-end-\(source)")
             XCTAssertLessThanOrEqual(
                 last.frame.maxY, mini.frame.minY + 1,
