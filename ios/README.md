@@ -192,6 +192,10 @@ TEST_RUNNER_VTAMP_UITEST_SERVER=http://127.0.0.1:8711/api xcodebuild \
 VTAMP_HOME="$vtamp_test_home" target/release/vtamp server stop
 ```
 
+`ConnectionBannerUITests` needs no server and runs with the unit tests: it
+points the app at a closed local port and checks that the connection banner
+sits above the Library and Queue navigation bars instead of on their buttons.
+
 The Queue regression loads the server's Queue onto the phone, scrolls both
 queues to the end, and checks that the last row ends above the mini player.
 It passes trivially on a Queue that fits on one screen, so queue about 20

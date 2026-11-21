@@ -71,10 +71,15 @@ struct RootView: View {
 }
 
 extension View {
-    /// The connection banner above the tab's navigation bar. Apply it outside
-    /// the tab's `NavigationStack`, so the bar and its buttons sit below it.
+    /// The connection banner above the tab's `NavigationStack`. A stack, not
+    /// a safe-area inset: the navigation bar ignores an inset from outside
+    /// and puts its buttons on the banner, and an inset inside the stack
+    /// hides the large title.
     func withConnectionBanner() -> some View {
-        safeAreaInset(edge: .top, spacing: 0) { ConnectionBanner() }
+        VStack(spacing: 0) {
+            ConnectionBanner()
+            self
+        }
     }
 
     /// The mini player above the tab bar. Apply it to the scrolling content
