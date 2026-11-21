@@ -23,9 +23,10 @@ struct TrackRow: View {
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
                 if track.kind == .video {
-                    Text("VIDEO")
-                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "video.fill")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel("Video")
                 }
             }
         }
