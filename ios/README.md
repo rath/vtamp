@@ -125,6 +125,7 @@ size and the total: tap one to play the list from there, use **Play** or
 cover are kept, not the saved video: a downloaded video track away from its
 server shows its cover. A download is the file as it was: a retag or new cover
 on the server reaches it only when it is removed and downloaded again.
+Downloads stay when the app connects to another server.
 
 A download runs while the app does, in the foreground or in the background
 while music plays; if iOS suspends the app, the download may fail and can be
