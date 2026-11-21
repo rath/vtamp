@@ -16,8 +16,9 @@ enum Kind: String, Codable, CaseIterable, Sendable {
 }
 
 /// A Library track. `path` and `cover` are paths on the server; the app only
-/// reads their extensions and whether they exist.
-struct Track: Decodable, Hashable, Identifiable, Sendable {
+/// reads their extensions and whether they exist. It encodes with the wire's
+/// names, for the index of downloaded tracks.
+struct Track: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let path: String?
     let url: String?
@@ -30,7 +31,7 @@ struct Track: Decodable, Hashable, Identifiable, Sendable {
     let video: Bool
     let source: Source?
 
-    struct Source: Decodable, Hashable, Sendable {
+    struct Source: Codable, Hashable, Sendable {
         let videoId: String?
         let videoUrl: String?
         let range: TimeRange?
@@ -102,6 +103,10 @@ struct Track: Decodable, Hashable, Identifiable, Sendable {
     var radioHost: String? { url.flatMap(URL.init)?.host() }
 
     var isPlayable: Bool { playability == .playable }
+
+    /// A file this phone can play can also be kept on it; a radio channel has
+    /// no file.
+    var isDownloadable: Bool { path != nil && isPlayable }
 
     /// The audio type by extension, matching the server's `Content-Type`.
     var mimeType: String? {

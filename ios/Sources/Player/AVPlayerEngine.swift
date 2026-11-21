@@ -103,9 +103,10 @@ final class AVPlayerEngine: PlaybackEngine {
     }
 
     private static func asset(_ url: URL, mimeType: String?) -> AVURLAsset {
-        // The URL has no extension; name the type when AVFoundation knows it.
+        // The server's URL has no extension; name the type when AVFoundation
+        // knows it. A downloaded file carries its extension.
         var options: [String: Any] = [:]
-        if let mimeType, AVURLAsset.isPlayableExtendedMIMEType(mimeType) {
+        if !url.isFileURL, let mimeType, AVURLAsset.isPlayableExtendedMIMEType(mimeType) {
             options[AVURLAssetOverrideMIMETypeKey] = mimeType
         }
         return AVURLAsset(url: url, options: options)

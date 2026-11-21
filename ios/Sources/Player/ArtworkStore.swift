@@ -1,13 +1,16 @@
 import UIKit
 
-/// Decoded covers by track ID. Bytes come through the client's URL cache,
-/// which revalidates them with the server's ETag.
+/// Decoded covers by track ID. A downloaded track brings its cover, which
+/// needs no server; other bytes come through the client's URL cache, which
+/// revalidates them with the server's ETag.
 actor ArtworkStore {
     private let cache = NSCache<NSString, UIImage>()
     private var missing: Set<String> = []
     private var client: VtampClient?
+    private let files: DownloadFiles
 
-    init() {
+    init(files: DownloadFiles = .standard) {
+        self.files = files
         cache.countLimit = 300
     }
 
@@ -20,6 +23,10 @@ actor ArtworkStore {
 
     func image(for track: Track) async -> UIImage? {
         if let image = cache.object(forKey: track.id as NSString) { return image }
+        if let image = await downloaded(track) {
+            cache.setObject(image, forKey: track.id as NSString)
+            return image
+        }
         guard !missing.contains(track.id), let client, let url = client.coverURL(for: track) else {
             return nil
         }
@@ -35,6 +42,13 @@ actor ArtworkStore {
             if case .http(404) = error { missing.insert(track.id) }
             return nil
         }
+    }
+
+    private func downloaded(_ track: Track) async -> UIImage? {
+        guard DownloadFiles.isSafe(track.id), let data = try? Data(contentsOf: files.cover(for: track.id)) else {
+            return nil
+        }
+        return await Self.decode(data)
     }
 
     /// Decode and downsize off the actor; covers can be large folder images.
