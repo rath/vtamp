@@ -55,9 +55,11 @@ fun VtampApp(store: AppStore, playback: PlaybackRuntime?) {
         var playerOpen by rememberSaveable { mutableStateOf(false) }
         val tabStates = rememberSaveableStateHolder()
         var initialized by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(app.client, app.connecting) {
-            if (!initialized && !app.connecting) {
-                if (app.client == null) tab = "Settings"
+        LaunchedEffect(app.client, app.connecting, app.ready) {
+            // Settings first only without a saved server: an unreachable one still leaves the
+            // Library, with its downloaded tracks, in front.
+            if (!initialized && app.ready && !app.connecting) {
+                if (app.client == null && app.address.isBlank()) tab = "Settings"
                 initialized = true
             }
             if (
@@ -289,11 +291,23 @@ private fun LibraryScreen(
         if (app.library.isNotEmpty())
             app.libraryError?.let { ErrorMessage(it, { store.search(app.query, app.kind, true) }) }
         LazyColumn(Modifier.fillMaxSize()) {
-            if (app.library.isEmpty() && !app.libraryLoading)
+            if (app.client == null && app.connecting)
                 item {
-                    val error = app.libraryError
+                    Box(
+                        Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            else if (app.library.isEmpty() && !app.libraryLoading)
+                item {
+                    // Before a first answer, a failure is the connection's.
+                    val error =
+                        app.libraryError
+                            ?: app.connectionError?.takeIf { app.client == null }
                     when {
-                        app.client == null ->
+                        app.client == null && error == null ->
                             EmptyState(
                                 "Connect to your music",
                                 "Add your vtamp server in Settings.",
@@ -311,7 +325,10 @@ private fun LibraryScreen(
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(
-                                        onClick = { store.search(app.query, app.kind, true) }
+                                        onClick = {
+                                            if (app.client == null) store.connect(app.address)
+                                            else store.search(app.query, app.kind, true)
+                                        }
                                     ) {
                                         Text("Retry")
                                     }

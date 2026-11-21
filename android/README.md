@@ -21,7 +21,11 @@ neither authentication nor TLS. Use a private network such as Tailscale.
 
 Changing to another server clears this phone's playback and queue only after
 the new connection succeeds. Failed connection attempts leave the old server
-available. Replies from an old server or search are discarded.
+available. Replies from an old server or search are discarded. When the saved
+server does not answer at launch, the app keeps its address and opens on the
+Library with **Retry** and, when tracks are downloaded, **Play Downloaded
+Tracks**; connection failures read as sentences such as "Cannot reach the
+server at 100.64.0.1:8700."
 
 ## Screens
 

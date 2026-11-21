@@ -4,6 +4,7 @@ import com.xrath.vtamp.api.*
 import com.xrath.vtamp.model.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.mockwebserver.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -136,5 +137,26 @@ class ApiTest {
             assertEquals(2L, VtampClient(server.url("/api")).queue().first.queueRevision)
             assertEquals(4, server.requestCount)
         }
+    }
+
+    @Test
+    fun failuresReadAsSentences() {
+        val server = "http://music-box:8700/api".toHttpUrl()
+        assertEquals(
+            "Cannot reach the server at music-box:8700.",
+            failureText(java.net.ConnectException("Failed to connect to /10.0.0.2:8700"), server),
+        )
+        assertEquals(
+            "Cannot find the server at music-box:8700. Check the address.",
+            failureText(java.net.UnknownHostException("music-box"), server),
+        )
+        assertEquals(
+            "The server did not answer in time.",
+            failureText(java.net.SocketTimeoutException("timeout")),
+        )
+        assertEquals(
+            "Library busy",
+            failureText(ApiException("library_busy", "Library busy"), server),
+        )
     }
 }

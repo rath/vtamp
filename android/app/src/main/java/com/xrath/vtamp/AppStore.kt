@@ -43,6 +43,8 @@ data class AppState(
     val queueLoading: Boolean = false,
     val queueError: String? = null,
     val video: Boolean = true,
+    /** The saved preferences have been read: [address] is the saved server, if any. */
+    val ready: Boolean = false,
 )
 
 class AppStore(private val context: Context, private val scope: CoroutineScope) {
@@ -63,9 +65,18 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
     init {
         scope.launch {
             val prefs = context.preferences.data.first()
-            mutable.update { it.copy(video = prefs[PreferenceKeys.video] ?: true) }
             val address = prefs[PreferenceKeys.address].orEmpty()
-            if (address.isNotBlank() && connection == null) connect(address)
+            // The saved address stands before it answers, so an unreachable server can be
+            // retried and edited rather than shown as no server at all.
+            val saved = address.isNotBlank() && connection == null
+            mutable.update {
+                it.copy(
+                    video = prefs[PreferenceKeys.video] ?: true,
+                    address = if (saved) address else it.address,
+                    ready = true,
+                )
+            }
+            if (saved) connect(address)
         }
     }
 
@@ -92,7 +103,7 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
                     queueJob?.cancel()
                     searchGeneration++
                     onServerChanged?.invoke()
-                    mutable.value = AppState(video = state.value.video)
+                    mutable.value = AppState(video = state.value.video, ready = true)
                 }
                 context.preferences.edit { it[PreferenceKeys.address] = base.toString() }
                 mutable.update {
@@ -116,7 +127,7 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
                 mutable.update {
                     it.copy(
                         connecting = false,
-                        connectionError = e.message ?: "Cannot reach server",
+                        connectionError = failureText(e, base),
                     )
                 }
             }
@@ -179,7 +190,7 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
                 mutable.update {
                     it.copy(
                         libraryLoading = false,
-                        libraryError = e.message ?: "Cannot load Library",
+                        libraryError = failureText(e, c.base),
                     )
                 }
         }
@@ -201,7 +212,9 @@ class AppStore(private val context: Context, private val scope: CoroutineScope) 
                 throw e
             } catch (e: Exception) {
                 if (generation == token)
-                    mutable.update { it.copy(queueLoading = false, queueError = e.message) }
+                    mutable.update {
+                        it.copy(queueLoading = false, queueError = failureText(e, c.base))
+                    }
             }
         }
     }

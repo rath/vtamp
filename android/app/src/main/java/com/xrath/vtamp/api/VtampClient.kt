@@ -31,6 +31,19 @@ data class Envelope<T>(
 
 class ApiException(val code: String, override val message: String) : IOException(message)
 
+/** A sentence for a failed request, in place of the network library's own wording. */
+fun failureText(e: Exception, server: HttpUrl? = null): String {
+    val where = server?.let { " at ${it.host}:${it.port}" }.orEmpty()
+    return when (e) {
+        is ApiException -> e.message
+        is java.net.UnknownHostException -> "Cannot find the server$where. Check the address."
+        is java.net.SocketTimeoutException -> "The server$where did not answer in time."
+        is java.net.ConnectException,
+        is java.net.NoRouteToHostException -> "Cannot reach the server$where."
+        else -> e.message ?: "Cannot reach the server$where."
+    }
+}
+
 fun serverAddress(text: String): HttpUrl? {
     val input = text.trim().let { if ("://" in it) it else "http://$it" }
     val url = input.toHttpUrlOrNull() ?: return null
