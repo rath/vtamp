@@ -126,7 +126,7 @@ struct VideoRendererTests {
         let session = try session()
         defer { session.invalidateAndCancel() }
         let client = VtampClient(baseURL: URL(string: "http://video.test/api")!)
-        let video = VideoRenderer(session: session, defaults: freshDefaults()) { client }
+        let video = VideoRenderer(session: session, defaults: freshDefaults()) { client.videoURL(for: $0) }
         defer { video.stopped() }
         let clock = try clock()
         video.show(.sheet, true)
@@ -157,6 +157,18 @@ struct VideoRendererTests {
         #expect(video.state == .idle)
     }
 
+    @Test func downloadedVideoShowsFramesWithoutAServer() async throws {
+        let url = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
+        try Fixture.data("video-h264", extension: "mkv").write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let video = VideoRenderer(defaults: freshDefaults()) { _ in url }
+        defer { video.stopped() }
+        video.show(.sheet, true)
+        video.ready(track: track(), timebase: try clock())
+        try await waitUntil { video.state == .showing(width: 64, height: 64) }
+        #expect(video.framesEnqueued > 0)
+    }
+
     @Test func cancellingARangeReadStopsItsDetachedFetch() async throws {
         let session = try session()
         defer { session.invalidateAndCancel() }
@@ -176,7 +188,7 @@ struct VideoRendererTests {
         let session = try session()
         defer { session.invalidateAndCancel() }
         let client = VtampClient(baseURL: URL(string: "http://video.test/api")!)
-        let video = VideoRenderer(session: session, defaults: freshDefaults()) { client }
+        let video = VideoRenderer(session: session, defaults: freshDefaults()) { client.videoURL(for: $0) }
         defer { video.stopped() }
         video.show(.sheet, true)
         video.ready(track: track(), timebase: try clock())

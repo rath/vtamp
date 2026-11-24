@@ -18,7 +18,9 @@ struct VtampApp: App {
         let player = Player(engine: AVPlayerEngine()) { [weak app, weak downloads] track in
             downloads?.audioURL(for: track) ?? app?.client?.audioURL(for: track)
         }
-        let video = VideoRenderer { [weak app] in app?.client }
+        let video = VideoRenderer { [weak app, weak downloads] track in
+            downloads?.videoURL(for: track) ?? app?.client?.videoURL(for: track)
+        }
         player.video = video
         _video = State(initialValue: video)
         // Live checks in the simulator must not sound through the Mac.

@@ -52,14 +52,12 @@ struct DownloadButton: View {
             case .downloaded:
                 // Lit, like the player's mode buttons: the same arrow, kept.
                 Menu {
-                    Button("Remove Download", systemImage: "trash", role: .destructive) {
-                        downloads.remove(track.id)
-                    }
+                    DownloadMenuItems(track: track, downloads: downloads, client: app.client)
                 } label: {
                     disc(lit: true) { Image(systemName: "arrow.down") }
                 }
                 .accessibilityLabel("Downloaded")
-                .accessibilityHint("Shows Remove Download")
+                .accessibilityHint("Shows download options")
             }
         }
         .accessibilityIdentifier("download")
@@ -97,6 +95,11 @@ struct DownloadMenuItems: View {
                 downloads.cancel(track.id)
             }
         case .downloaded:
+            if downloads.needsVideo(track) {
+                Button("Download Video", systemImage: "arrow.down.circle") {
+                    downloads.download(track, from: client)
+                }
+            }
             Button("Remove Download", systemImage: "trash", role: .destructive) {
                 downloads.remove(track.id)
             }

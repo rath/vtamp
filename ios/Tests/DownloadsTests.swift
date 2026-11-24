@@ -96,6 +96,7 @@ struct DownloadsTests {
         let video = try Fixture.decode(Track.self, from: "track-youtube")
         transport.serve("/api/library/\(video.id)/audio", Data("x".utf8))
         transport.serve("/api/library/b2/audio", Data("yy".utf8))
+        transport.serve("/api/library/\(video.id)/video", Data("mkv".utf8))
         downloads.download(video, from: client)
         await downloads.tasks[video.id]?.value
         downloads.download(track("b2", cover: false), from: client)
@@ -105,7 +106,32 @@ struct DownloadsTests {
         #expect(restarted.items.map(\.id) == ["b2", video.id], "newest first")
         #expect(restarted.items.last?.track == video, "the source range and the video flag come back")
         #expect(restarted.status(of: video) == .downloaded)
-        #expect(restarted.totalBytes == 3)
+        #expect(restarted.totalBytes == 6)
+        #expect(try Data(contentsOf: #require(restarted.videoURL(for: video))) == Data("mkv".utf8))
+        restarted.remove(video.id)
+        #expect(!stored().contains(files.video(for: video.id).lastPathComponent))
+    }
+
+    @Test func missingVideoCanBeAddedWithoutReplacingDownloadedAudio() async throws {
+        let video = try Fixture.decode(Track.self, from: "track-youtube")
+        let audioName = try #require(DownloadFiles.audioName(for: video))
+        try Data("audio".utf8).write(to: files.audio(named: audioName))
+        let old = Download(track: video, fileName: audioName, bytes: 5, addedAt: Date())
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        try encoder.encode([old]).write(to: files.index)
+        let restarted = Downloads(files: files, transport: transport)
+        let path = "/api/library/\(video.id)/video"
+        restarted.download(video, from: client)
+        await restarted.tasks[video.id]?.value
+        #expect(restarted.items == [old])
+        #expect(restarted.needsVideo(video))
+        transport.serve(path, Data("mkv".utf8))
+        restarted.download(video, from: client)
+        await restarted.tasks[video.id]?.value
+        #expect(transport.requested == [path, path])
+        #expect(restarted.totalBytes == 8)
+        #expect(!restarted.needsVideo(video))
     }
 
     @Test func aTrackWithoutACoverOnTheServerStillDownloads() async {

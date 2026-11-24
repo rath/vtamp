@@ -101,7 +101,7 @@ final class VideoRenderer: VideoSink {
     @ObservationIgnored let layer = AVSampleBufferDisplayLayer()
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let session: URLSession
-    @ObservationIgnored private let client: () -> VtampClient?
+    @ObservationIgnored private let videoURL: (Track) -> URL?
     @ObservationIgnored private var track: Track?
     @ObservationIgnored private var timebase: CMTimebase?
     @ObservationIgnored private var attached: (trackID: String, timebase: CMTimebase)?
@@ -114,8 +114,8 @@ final class VideoRenderer: VideoSink {
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var tokens: [any NSObjectProtocol] = []
 
-    init(session: URLSession = .shared, defaults: UserDefaults = .standard, client: @escaping () -> VtampClient?) {
-        self.client = client
+    init(session: URLSession = .shared, defaults: UserDefaults = .standard, videoURL: @escaping (Track) -> URL?) {
+        self.videoURL = videoURL
         self.session = session
         self.defaults = defaults
         preferred = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
@@ -186,13 +186,13 @@ final class VideoRenderer: VideoSink {
             detach()
             return
         }
-        guard wanted, !suspended, let timebase, let client = client() else {
+        guard wanted, !suspended, let timebase, let url = videoURL(track) else {
             detach(keepingPicture: true)
             return
         }
         if let attached, attached.trackID == track.id, attached.timebase === timebase { return }
         detach(keepingPicture: true)
-        attach(track: track, timebase: timebase, url: client.videoURL(for: track))
+        attach(track: track, timebase: timebase, url: url)
     }
 
     private func attach(track: Track, timebase: CMTimebase, url: URL) {
@@ -203,9 +203,14 @@ final class VideoRenderer: VideoSink {
         let session = session
         pump = Task { [weak self] in
             do {
-                let source = try await HTTPByteSource.open(url, session: session)
+                let source: any ByteSource
+                if url.isFileURL {
+                    source = try FileByteSource(url)
+                } else {
+                    source = try await HTTPByteSource.open(url, session: session)
+                }
                 // Includes speculative range requests, which are not children of this task.
-                defer { Task { await source.cancel() } }
+                defer { if let remote = source as? HTTPByteSource { Task { await remote.cancel() } } }
                 try Task.checkCancellation()
                 let file = try await MatroskaFile.open(source)
                 try Task.checkCancellation()

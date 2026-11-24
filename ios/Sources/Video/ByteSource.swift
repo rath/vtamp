@@ -62,6 +62,28 @@ struct DataByteSource: ByteSource {
     }
 }
 
+/// A downloaded sidecar. The demuxer reads bounded ranges as it does over HTTP.
+actor FileByteSource: ByteSource {
+    nonisolated let length: Int64
+    private let handle: FileHandle
+
+    init(_ url: URL) throws {
+        handle = try FileHandle(forReadingFrom: url)
+        length = Int64(try handle.seekToEnd())
+    }
+
+    func read(_ range: Range<Int64>) throws -> Data {
+        try Task.checkCancellation()
+        guard range.lowerBound >= 0, range.upperBound <= length else { throw VideoError.truncated }
+        guard !range.isEmpty else { return Data() }
+        try handle.seek(toOffset: UInt64(range.lowerBound))
+        guard let data = try handle.read(upToCount: range.count), data.count == range.count else {
+            throw VideoError.truncated
+        }
+        return data
+    }
+}
+
 /// A file on the server, read with `Range` requests in fixed chunks. An
 /// `If-Range` with the file's `ETag` turns a rewritten file into an error
 /// instead of a mix of two versions.

@@ -112,7 +112,7 @@ loudness normalization, and controlling the server's own playback.
 ### Downloads
 
 Nothing is downloaded by itself. The arrow at the top right of the player
-keeps the current track on the iPhone: its audio file, its cover, and the
+keeps the current track on the iPhone: its audio file, its saved video when present, its cover, and the
 Library row as the server described it. While the file arrives the button
 shows the progress, and a tap cancels; once the track is kept the button is
 lit, and its menu removes the download. Long-pressing a Library or Queue row
@@ -124,9 +124,10 @@ A downloaded track plays from its file wherever it is played, so it needs no
 server; when the Library cannot load, **Play Downloaded Tracks** opens the
 list. **Settings → Downloaded** lists the kept tracks, newest first, with each
 size and the total: tap one to play the list from there, use **Play** or
-**Shuffle**, swipe to remove one, or **Remove All**. Only the audio and the
-cover are kept, not the saved video: a downloaded video track away from its
-server shows its cover. A download is the file as it was: a retag or new cover
+**Shuffle**, swipe to remove one, or **Remove All**. Downloaded video plays from the phone, including offline.
+For a video track downloaded by an older version, choose **Download Video**
+from the player's download menu or the track's context menu while connected to
+its server. This adds the picture to the existing audio. A download is the file as it was: a retag or new cover
 on the server reaches it only when it is removed and downloaded again.
 Downloads stay when the app connects to another server.
 

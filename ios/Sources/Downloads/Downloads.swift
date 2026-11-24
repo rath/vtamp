@@ -2,12 +2,12 @@ import Foundation
 import Observation
 
 /// A Library track kept on the phone: the row as the server described it when
-/// it was downloaded, and its audio file.
+/// it was downloaded, and its local media files.
 struct Download: Codable, Equatable, Identifiable, Sendable {
     let track: Track
     /// The audio file's name inside the downloads directory.
     let fileName: String
-    let bytes: Int64
+    var bytes: Int64
     let addedAt: Date
 
     var id: String { track.id }
@@ -26,6 +26,8 @@ struct DownloadFiles: Sendable {
     var index: URL { directory.appending(component: "index.json") }
 
     func audio(named fileName: String) -> URL { directory.appending(component: fileName) }
+
+    func video(for id: String) -> URL { directory.appending(component: "\(id).video.mkv") }
 
     func cover(for id: String) -> URL { directory.appending(component: "\(id).cover") }
 
@@ -47,7 +49,7 @@ struct DownloadFiles: Sendable {
 }
 
 /// The tracks kept on this iPhone. A downloaded track plays from its file,
-/// with or without the server; the saved video is not downloaded.
+/// with or without the server, including its saved video.
 @MainActor
 @Observable
 final class Downloads {
@@ -92,8 +94,18 @@ final class Downloads {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    func videoURL(for track: Track) -> URL? {
+        guard track.video, records[track.id] != nil else { return nil }
+        let url = files.video(for: track.id)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func needsVideo(_ track: Track) -> Bool {
+        track.video && records[track.id] != nil && videoURL(for: track) == nil
+    }
+
     func download(_ track: Track, from client: VtampClient?) {
-        guard status(of: track) == .absent else { return }
+        guard tasks[track.id] == nil, records[track.id] == nil || needsVideo(track) else { return }
         guard track.isDownloadable, let name = DownloadFiles.audioName(for: track) else {
             lastError = "\(track.title) cannot be downloaded"
             return
@@ -143,23 +155,46 @@ final class Downloads {
             progress[id] = nil
             active.removeAll { $0.id == id }
         }
+        let existing = records[id]
+        let video = files.video(for: id)
         do {
-            let fetched = try await transport.fetch(client.audioURL(for: track)) { [weak self] fraction in
-                Task { @MainActor in self?.report(fraction, for: id) }
-            }
-            try place(fetched, at: audio)
-            // The cover is small and optional: a track without one still downloads.
-            if let url = client.coverURL(for: track), let image = try? await transport.fetch(url, progress: { _ in }) {
-                try? place(image, at: cover)
+            let audioShare = track.video ? 0.5 : 1.0
+            if existing == nil {
+                let fetched = try await transport.fetch(client.audioURL(for: track)) { [weak self] fraction in
+                    Task { @MainActor in self?.report(fraction * audioShare, for: id) }
+                }
+                try place(fetched, at: audio)
+                if let url = client.coverURL(for: track), let image = try? await transport.fetch(url, progress: { _ in }) {
+                    try? place(image, at: cover)
+                }
             }
             try Task.checkCancellation()
-            let record = Download(track: track, fileName: name, bytes: Self.size(of: audio), addedAt: Date())
+            if track.video {
+                let offset = existing == nil ? audioShare : 0
+                let fetched = try await transport.fetch(client.videoURL(for: track)) { [weak self] fraction in
+                    Task { @MainActor in self?.report(offset + fraction * (1 - offset), for: id) }
+                }
+                try place(fetched, at: video)
+            }
+            try Task.checkCancellation()
+            let fileName = existing?.fileName ?? name
+            let bytes = Self.size(of: files.audio(named: fileName)) + Self.size(of: video)
+            let record = Download(track: track, fileName: fileName, bytes: bytes, addedAt: existing?.addedAt ?? Date())
+            var updated = items
+            if let index = updated.firstIndex(where: { $0.id == id }) {
+                updated[index] = record
+            } else {
+                updated.insert(record, at: 0)
+            }
+            try Self.encoder.encode(updated).write(to: files.index, options: .atomic)
+            items = updated
             records[id] = record
-            items.insert(record, at: 0)
-            save()
         } catch {
-            try? FileManager.default.removeItem(at: audio)
-            try? FileManager.default.removeItem(at: cover)
+            try? FileManager.default.removeItem(at: video)
+            if existing == nil {
+                try? FileManager.default.removeItem(at: audio)
+                try? FileManager.default.removeItem(at: cover)
+            }
             if !(error is CancellationError) {
                 lastError = "\(track.title): \(error.localizedDescription)"
             }
@@ -204,7 +239,13 @@ final class Downloads {
 
         if let data = try? Data(contentsOf: files.index),
            let stored = try? VtampClient.decoder.decode([Download].self, from: data) {
-            items = stored.filter { manager.fileExists(atPath: files.audio(named: $0.fileName).path) }
+            items = stored.compactMap { item in
+                let audio = files.audio(named: item.fileName)
+                guard DownloadFiles.isSafe(item.id), manager.fileExists(atPath: audio.path) else { return nil }
+                var item = item
+                item.bytes = Self.size(of: audio) + Self.size(of: files.video(for: item.id))
+                return item
+            }
             records = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         }
         sweep()
@@ -217,6 +258,7 @@ final class Downloads {
         var kept: Set<String> = [files.index.lastPathComponent]
         for item in items {
             kept.insert(item.fileName)
+            if item.track.video { kept.insert(files.video(for: item.id).lastPathComponent) }
             kept.insert(files.cover(for: item.id).lastPathComponent)
         }
         let found = (try? manager.contentsOfDirectory(atPath: files.directory.path)) ?? []
@@ -231,6 +273,7 @@ final class Downloads {
     }
 
     private func delete(_ record: Download) {
+        try? FileManager.default.removeItem(at: files.video(for: record.id))
         try? FileManager.default.removeItem(at: files.audio(named: record.fileName))
         try? FileManager.default.removeItem(at: files.cover(for: record.id))
     }
