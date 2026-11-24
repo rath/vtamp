@@ -368,9 +368,13 @@ the kind filter (all → video → radio), and `vtamp library search --kind vide
 lists the same tracks for scripts.
 Halfblock and `--art none` sessions retain their existing artwork behavior.
 
-Press uppercase `F` while video is visible to fill the current terminal pane,
+Press uppercase `F` for the current saved video to fill the terminal pane,
 preserving the picture's aspect ratio with a one-line control hint. `F` or `Esc`
 returns to the normal layout without clearing search filters or detaching.
+This also works before the first video frame arrives or when the pane is too
+small for the inline picture. Fullscreen fits panes below the browser's 40 × 12
+minimum. In the normal layout, the picture and controls rearrange to use the
+available space, and media grows with larger terminals.
 Space, seek, volume, shuffle/repeat, and next/previous still work. Browsing or
 opening a dialog returns to the normal layout. When the next track also has a
 saved video, fullscreen continues with it, whether the track ended naturally or

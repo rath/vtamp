@@ -137,7 +137,9 @@ media, uses a fake downloader with real FFmpeg, and runs muted isolated servers
 and private tmux sockets. No network, browser cookies, LLM, or personal library is
 used. It compares 8/12/15 fps, records Kitty uploads, output bandwidth,
 Ghostty/tmux/TUI/FFmpeg CPU time, input response times and TUI RSS, checks
-fullscreen controls and pane swaps, and captures real pixels under `/tmp` for
+fullscreen controls, missing art, pane swaps, and responsive layouts from 40×12
+through 200×60 cells. It also enters fullscreen below the browser minimum, after
+the inline video disappears. It captures real pixels under `/tmp` for
 manual inspection. Use `--fps 12` for a single rate or
 `--output /tmp/vtamp-video-check` to choose the evidence directory.
 Add `--trace-terminal` to check input cursor motion in tmux's actual output to

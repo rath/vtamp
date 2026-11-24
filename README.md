@@ -325,7 +325,7 @@ Album covers prefer high-resolution Kitty graphics, then native Sixel, and fall 
 | `--art kitty` | Explicit Kitty graphics protocol; requires terminal/multiplexer support |
 | `--art none` | Hide album art |
 
-Artwork comes from the embedded front cover first, then the first embedded picture, then `cover.jpg`, `cover.png`, `folder.jpg`, and similar files beside the audio; missing or undecodable art shows “No album art”. YouTube imports can save video up to 480p, which plays in the cover area on macOS with Kitty or Sixel graphics: `w` switches between video and cover, and `F` fills the pane. Probing rules, the tmux Kitty transport, and the video transmission settings are in [Album art, terminal graphics, and tmux](docs/terminal-graphics.md); video imports are in [docs/imports.md](docs/imports.md#terminal-video-macos).
+Artwork comes from the embedded front cover first, then the first embedded picture, then `cover.jpg`, `cover.png`, `folder.jpg`, and similar files beside the audio. Missing or undecodable art shows “No album art”. Pictures and controls rearrange to fit small panes and grow with large terminals. YouTube imports can save video up to 480p, which plays in the cover area on macOS with Kitty or Sixel graphics. `w` switches between video and cover, and `F` fills the pane, including before the first frame appears or below the browser's 40 × 12 minimum. Probing rules, the tmux Kitty transport, and the video transmission settings are in [Album art, terminal graphics, and tmux](docs/terminal-graphics.md). Video imports are in [docs/imports.md](docs/imports.md#terminal-video-macos).
 
 ## tmux status bar
 

@@ -47,7 +47,28 @@ The Korean page (`site/ko/`) puts self-hosted Pretendard ahead of Space Grotesk 
 
 ## Layout
 
-The TUI is an Operate surface: queue, library, current track, timing, and key hints have priority. At 12–27 rows and at least 72 columns, the player and focused browser share one row. The player takes 40% of the width, bounded to 30–44 columns; Library or Queue takes the rest and switches with Tab. The player stacks a centered cover above metadata, progress, and two rows of controls. Cover size follows available height while reserving readable controls. At 28 or more rows, now playing sits above the lists; from 90 columns, both lists are visible below it. Panes narrower than 72 columns keep the stacked layout and use a compact now-playing summary at 12–13 rows. Minimum usable size is 40 × 12 cells. Cover art gives context without dominating the queue. The bottom hint bar leads with Enter (play the selection) and Space, whose label names the action it will take now: pause while playing, resume while paused, play while stopped. Wider panes add skip, seek or add, volume, list, search, spectrum, and theme hints; a narrow bar drops groups and then tightens spacing rather than clipping the last hint.
+The TUI is an Operate surface. Keep the current picture, playback controls, and
+focused browser usable together from 40 × 12 cells upward. At 12–27 rows and at
+least 72 columns, the player and focused browser share one row. The player takes
+40% of the width, with a minimum of 30 columns, or 42 when showing media below
+16 rows. Library or Queue takes the rest and switches with Tab. At 28 or more
+rows, Now Playing sits above the lists. From 90 columns, both lists are visible
+below it. Panes narrower than 72 columns also stack the player above the browser.
+
+For stacked layouts with media, reserve at least five browser rows, roughly a
+third of the body below 72 columns and half on wider panes. The player grows
+into the remaining height, bounded by the picture's aspect ratio and control
+space. Compare the picture area beside the controls with the area above them
+and use the larger fit. Preserve the source aspect, including wide thumbnails
+and portrait covers, and let media grow with large terminals. Below 16 rows,
+narrow panes with media omit the masthead and the player's bottom border to
+retain picture space. Panes without media use a compact playback summary.
+
+The bottom hint bar leads with Enter (play the selection) and Space, whose label
+names its current action. Keep `F fullscreen` available for saved video, including
+while its first frame is pending. Wider panes add skip, seek or add, volume,
+list, search, spectrum, and theme hints. Drop optional groups and tighten spacing
+to fit. Below the browser's 40 × 12 minimum, offer `F` for the current saved video.
 
 On the first connection of a TUI attachment, active playback focuses Queue and
 selects the current queue entry, scrolling it into view. Paused/stopped sessions
@@ -351,11 +372,15 @@ Tab/Space, without range fields. Enter confirms; Esc cancels.
 
 Saved video automatically occupies the existing cover area with its own aspect
 ratio. `w` toggles video/cover and saves the display preference; `v`/`V` retain
-spectrum behavior. Uppercase `F` fills only the current terminal pane with an
-aspect-preserving picture and one footer line: `F/Esc back`, Space's current
+spectrum behavior. Uppercase `F` works before the first frame arrives, including
+when the inline picture has no room. It fills the current terminal pane with an
+aspect-preserving picture and one footer line containing `F/Esc back`, Space's current
 pause/resume action, and seek/volume hints when they fit. Reserve the right end
 for elapsed / total time (`01:44 / 04:32`), dropping optional hints before time
-at narrow widths. Hide the lists and spectrum in fullscreen; suspend spectrum
+at narrow widths. Below 26 columns, shorten the clock to elapsed time, and below
+12 columns keep only the return hint. A one-row pane uses the whole row for the
+picture. Fullscreen can render below the browser's 40 × 12 minimum. Hide the lists
+and spectrum in fullscreen and suspend spectrum
 work. `F`/`Esc` returns without changing filters. Playback keys stay active;
 browsing and dialogs return to the normal layout. A track change into another
 saved video keeps fullscreen, waiting with a blank picture until its first frame;

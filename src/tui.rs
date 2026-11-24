@@ -1091,7 +1091,11 @@ impl App {
         // consumes the pending redraw, so the animation timer settles.
         let animation = if self.spectrum_visible() && self.spectrum.needs_animation(playing) {
             Some(last_draw + Duration::from_millis(50))
-        } else if playing && !live && self.viewport.width >= 40 && self.viewport.height >= 12 {
+        } else if playing
+            && !live
+            && (self.video_fullscreen.is_some()
+                || (self.viewport.width >= 40 && self.viewport.height >= 12))
+        {
             // Keep the progress gauge responsive, including short tracks. Identical
             // text/cells are discarded before sending anything to the terminal.
             Some(last_draw + Duration::from_millis(100))
@@ -1130,6 +1134,25 @@ impl App {
         }
     }
 
+    fn can_fullscreen(&self) -> bool {
+        self.connected
+            && self.show_art
+            && self.state.status != PlaybackStatus::Stopped
+            && self
+                .state
+                .current()
+                .is_some_and(|item| self.video.can_fullscreen(&item.track))
+    }
+
+    fn has_picture(&self) -> bool {
+        self.show_art
+            && (self.cover_image.is_some()
+                || self.cover_loading
+                || self.video.aspect.is_some()
+                || (self.video.enabled
+                    && self.state.current().is_some_and(|item| item.track.video)))
+    }
+
     fn sync_video(&mut self) {
         let _span = diagnostics::span("video.sync", || serde_json::json!({}));
         if let Some(id) = &self.video_fullscreen {
@@ -1152,8 +1175,8 @@ impl App {
             self.connected,
             self.show_art
                 && !self.cover_hidden()
-                && self.viewport.width >= 40
-                && self.viewport.height >= 12,
+                && (self.video_fullscreen.is_some()
+                    || (self.viewport.width >= 40 && self.viewport.height >= 12)),
             self.position(),
             cover_background(self.theme.palette()),
         );
@@ -1163,7 +1186,7 @@ impl App {
         let ending = self.video.ended
             && duration
                 .is_some_and(|d| self.position().saturating_add(FULLSCREEN_END_GRACE_MS) >= d);
-        if !self.video.reserves_area() && !ending {
+        if !self.video.reserves_area() && !ending && !self.can_fullscreen() {
             self.video_fullscreen = None;
         }
     }
@@ -1351,8 +1374,12 @@ impl App {
             );
         }
         frame.render_widget(
-            Paragraph::new("↑/↓ j/k preview · Enter save\nEsc/q cancel · saved for next attach")
-                .style(Style::default().fg(p.muted)),
+            Paragraph::new(if hint.width < 35 {
+                "↑/↓ preview · Enter save\nEsc/q cancel"
+            } else {
+                "↑/↓ j/k preview · Enter save\nEsc/q cancel · saved for next attach"
+            })
+            .style(Style::default().fg(p.muted)),
             hint,
         );
     }
@@ -2214,7 +2241,7 @@ impl App {
         {
             if self.video_fullscreen.is_some() {
                 self.video_fullscreen = None;
-            } else if self.video.enabled && self.video.has_frame() {
+            } else if self.can_fullscreen() {
                 self.video_fullscreen = self.state.current().map(|item| item.id.clone());
             }
             return Ok(false);
@@ -2650,22 +2677,27 @@ impl App {
             Block::default().style(Style::default().bg(p.bg).fg(p.text)),
             area,
         );
+        if self.video_fullscreen.is_some() {
+            self.draw_video_fullscreen(frame, area);
+            return;
+        }
         if area.width < 40 || area.height < 12 {
+            self.video.area = Rect::default();
             frame.render_widget(
-                Paragraph::new(
-                    "vtamp\nPane is too small (40 × 12 minimum).\nPlayback continues. q detaches.",
-                )
+                Paragraph::new(if self.can_fullscreen() {
+                    "F fullscreen · q detach\nLibrary and Queue need 40 × 12."
+                } else {
+                    "vtamp\nPane is too small (40 × 12 minimum).\nPlayback continues. q detaches."
+                })
                 .wrap(Wrap { trim: false }),
                 area,
             );
             return;
         }
-        if self.video_fullscreen.is_some() {
-            self.draw_video_fullscreen(frame, area);
-            return;
-        }
+        let has_picture = self.has_picture();
+        let short_stack = has_picture && area.width < 72 && area.height < 16;
         let [header, body, status, hints] = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(u16::from(!short_stack)),
             Constraint::Min(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -2673,15 +2705,25 @@ impl App {
         .areas(area);
         let side_by_side = area.height < 28 && area.width >= 72;
         let (now, content) = if side_by_side {
-            // Give the browser most of the width; the player stacks its cover
-            // above metadata instead of spending a full-width horizontal strip.
-            let player_width = (u32::from(area.width) * 2 / 5).clamp(30, 44) as u16;
+            // Short players need room for a picture beside their controls.
+            let min_player_width = if has_picture && area.height < 16 {
+                42
+            } else {
+                30
+            };
+            let player_width = (u32::from(area.width) * 2 / 5).max(min_player_width) as u16;
             let [now, content] =
                 Layout::horizontal([Constraint::Length(player_width), Constraint::Min(1)])
                     .areas(body);
             (now, content)
         } else {
-            let now_height = if area.height >= 28 {
+            let now_height = if has_picture {
+                // Keep at least one complete list item or the theme picker's
+                // option and hints. A narrow pane can spend more rows on media.
+                let list_rows = (body.height / if area.width < 72 { 3 } else { 2 }).max(5);
+                let (_, picture_rows) = self.cover_shape().size(area.width - 2, body.height);
+                (body.height - list_rows).min(picture_rows.saturating_add(7))
+            } else if area.height >= 28 {
                 11
             } else if area.height >= 14 {
                 6
@@ -2714,7 +2756,7 @@ impl App {
             header,
         );
         let embedded_spectrum = self.spectrum.enabled && area.height >= 28 && area.width >= 72;
-        self.now_playing(frame, now, embedded_spectrum);
+        self.now_playing(frame, now, embedded_spectrum, short_stack);
         if self.spectrum_replaces_list() {
             if self.spectrum_visible() {
                 self.draw_spectrum(frame, content, true);
@@ -2775,7 +2817,7 @@ impl App {
             .current()
             .is_some_and(|item| item.track.is_live());
         let mut groups = vec!["Enter play", space];
-        if self.video.has_frame() {
+        if self.can_fullscreen() {
             groups.push("F fullscreen");
         }
         if area.width >= 102 {
@@ -2816,6 +2858,9 @@ impl App {
         let mut keys = format!(" {}", groups.join("  "));
         if keys.chars().count() > usize::from(area.width) {
             keys = groups.join(" ");
+        }
+        if self.can_fullscreen() && !groups.contains(&"F fullscreen") {
+            keys = format!("Enter play {space} F fullscreen ? q");
         }
         if self.extensions.active() {
             keys = " Extension active · Esc returns".into();
@@ -2860,17 +2905,16 @@ impl App {
     }
     fn draw_video_fullscreen(&mut self, frame: &mut Frame, area: Rect) {
         let p = self.theme.palette();
-        let [picture, hints] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-        let (width, height) = self.cover_shape().size(picture.width, picture.height);
-        let target = Rect::new(
-            picture.x + (picture.width - width) / 2,
-            picture.y + (picture.height - height) / 2,
-            width,
-            height,
-        );
+        let [picture, hints] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(u16::from(area.height >= 2)),
+        ])
+        .areas(area);
+        let target = self.cover_shape().fit(picture);
         self.video.area = target;
-        self.video.render(frame, target);
+        if !target.is_empty() {
+            self.video.render(frame, target);
+        }
         let space = if self.state.status == PlaybackStatus::Paused {
             "Space resume"
         } else {
@@ -2881,11 +2925,17 @@ impl App {
             .current()
             .and_then(|item| item.track.duration_ms)
             .unwrap_or(0);
-        let time = format!(
-            "{:0>5} / {:0>5} ",
-            display_time(self.position()),
-            display_time(duration)
-        );
+        let time = if area.width >= 26 {
+            format!(
+                "{:0>5} / {:0>5} ",
+                display_time(self.position()),
+                display_time(duration)
+            )
+        } else if area.width >= 12 {
+            format!("{} ", display_time(self.position()))
+        } else {
+            String::new()
+        };
         let [controls, clock] =
             Layout::horizontal([Constraint::Min(0), Constraint::Length(time.len() as u16)])
                 .areas(hints);
@@ -2894,7 +2944,12 @@ impl App {
         if Line::from(format!("{help}{extra}")).width() < controls.width as usize {
             help.push_str(extra);
         } else if help.len() >= controls.width as usize {
-            help = " F/Esc back".into();
+            help = if controls.width >= 11 {
+                " F/Esc back"
+            } else {
+                "F/Esc"
+            }
+            .into();
         }
         frame.render_widget(
             Paragraph::new(help).style(Style::default().bg(p.panel).fg(p.muted)),
@@ -3011,9 +3066,9 @@ impl App {
             footer,
         );
     }
-    fn now_playing(&mut self, frame: &mut Frame, area: Rect, spectrum: bool) {
+    fn now_playing(&mut self, frame: &mut Frame, area: Rect, spectrum: bool, short_stack: bool) {
         let p = self.theme.palette();
-        let panel = block(
+        let mut panel = block(
             p,
             if self.state.direct.is_some() {
                 " NOW PLAYING · NO QUEUE "
@@ -3022,45 +3077,35 @@ impl App {
             },
             false,
         );
+        if short_stack {
+            panel = panel.borders(Borders::TOP | Borders::LEFT | Borders::RIGHT);
+        }
         let inner = panel.inner(area);
         frame.render_widget(panel, area);
         let shape = self.cover_shape();
-        let (cover, info) = if spectrum {
+        let player = if spectrum {
             let [left, right] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(inner);
             if self.spectrum_visible() {
                 self.draw_spectrum(frame, right, false);
             }
-            if self.show_art && left.width >= 28 {
-                let (width, height) =
-                    shape.size(left.width.saturating_sub(22), inner.height.min(9));
-                let cover = Rect::new(left.x, left.y + (inner.height - height) / 2, width, height);
-                let info = Rect::new(
-                    cover.x + cover.width + 2,
-                    left.y,
-                    left.width.saturating_sub(cover.width + 2),
-                    left.height,
-                );
-                (Some(cover), info)
-            } else {
-                (None, left)
-            }
+            left
         } else {
-            now_playing_regions(inner, self.show_art, shape)
+            inner
         };
-        let cover = cover.map(|mut rect| {
-            if self.video.aspect.is_some() {
-                let font = self.artwork.font_size();
-                let width = rect.width.min(854 / font.width.max(1));
-                let height = rect.height.min(480 / font.height.max(1));
-                rect.x += (rect.width - width) / 2;
-                rect.y += (rect.height - height) / 2;
-                rect.width = width;
-                rect.height = height;
+        let (mut cover, mut info) = now_playing_regions(player, self.show_art, shape);
+        // Missing artwork and live radio need a readable label in narrow
+        // players. One label row leaves five rows for track info and controls.
+        if !self.has_picture() && cover.is_some_and(|area| area.width < 11) {
+            if player.height >= 7 {
+                cover = Some(Rect::new(player.x, player.y, player.width, 1));
+                info = Rect::new(player.x, player.y + 2, player.width, player.height - 2);
+            } else {
+                cover = None;
+                info = player;
             }
-            rect
-        });
+        }
         self.video.area = cover.unwrap_or_default();
         let item = self.state.current();
         // Streams carry no artwork to load; never report them as missing art.
@@ -3085,8 +3130,8 @@ impl App {
                 } else if !self.cover_loading {
                     // A short stacked player can reserve only four columns for
                     // a square image. Let the label use the full player width.
-                    let (x, width) = if info.y > cover.y {
-                        (inner.x, inner.width)
+                    let (x, width) = if info.x == player.x {
+                        (player.x, player.width)
                     } else {
                         (cover.x, cover.width)
                     };
@@ -3100,7 +3145,7 @@ impl App {
             }
         }
         let title = item.map_or("Your music, your terminal.", |q| q.track.title.as_str());
-        if inner.height < 4 {
+        if info.height < 4 {
             frame.render_widget(
                 Paragraph::new(vec![
                     Line::styled(
@@ -3339,9 +3384,20 @@ struct CoverShape {
 }
 
 impl CoverShape {
-    /// Largest size matching the cover's shape inside a `width × height` box.
-    /// Callers place the artwork; the narrow player centers it, the column
-    /// layouts keep it beside the text.
+    /// Center the uncropped picture in a band of terminal cells.
+    fn fit(self, band: Rect) -> Rect {
+        if band.is_empty() {
+            return band;
+        }
+        let (width, height) = self.size(band.width, band.height);
+        Rect::new(
+            band.x + (band.width - width) / 2,
+            band.y + (band.height - height) / 2,
+            width,
+            height,
+        )
+    }
+
     fn size(&self, width: u16, height: u16) -> (u16, u16) {
         let max_width = width.max(1);
         let max_height = height.max(1);
@@ -3360,46 +3416,41 @@ impl CoverShape {
     }
 }
 
-/// Retain artwork in a narrow, tall player by stacking it above the text.
-/// Reserve room for title, progress, volume, shuffle, and repeat even at 12 rows.
-fn now_playing_regions(inner: Rect, show_art: bool, cover: CoverShape) -> (Option<Rect>, Rect) {
-    if !show_art || inner.height < 7 || inner.width < 18 {
+/// Fit both compositions in actual terminal cells. Tall players can put the
+/// text below the picture; short players use the rows beside it for controls.
+fn now_playing_regions(inner: Rect, show_art: bool, shape: CoverShape) -> (Option<Rect>, Rect) {
+    if !show_art || inner.is_empty() {
         return (None, inner);
     }
-    if inner.width >= 64 {
-        let (width, height) = cover.size(inner.width.saturating_sub(22), inner.height.min(9));
-        // Center the artwork in the player's column so a short band does not
-        // pin it to the top edge.
-        let art = Rect::new(
-            inner.x,
-            inner.y + (inner.height - height) / 2,
-            width,
-            height,
-        );
-        let info = Rect::new(
-            art.x + art.width + 2,
-            inner.y,
-            inner.width.saturating_sub(art.width + 2),
-            inner.height,
-        );
-        return (Some(art), info);
+    // Two lines of narrow controls need 20 columns; leave a two-cell gutter.
+    let beside = shape.fit(Rect {
+        width: inner.width.saturating_sub(22),
+        ..inner
+    });
+    // Title, artist, timeline and up to two lines of controls below the art.
+    let above = shape.fit(Rect {
+        height: inner.height.saturating_sub(5),
+        ..inner
+    });
+    if !above.is_empty() && above.area() > beside.area() {
+        let info = Rect::new(inner.x, inner.bottom() - 5, inner.width, 5);
+        return (Some(above), info);
     }
-    // A wide cover is width-limited here, which leaves room above and below:
-    // center it between the panel edge and the info block (including the
-    // separator row) so the artwork does not stick to the top edge.
-    let band = inner.height.saturating_sub(7).max(2);
-    let (width, height) = cover.size(inner.width, band);
-    let art = Rect::new(
-        inner.x + (inner.width - width) / 2,
-        inner.y + (band + 1 - height) / 2,
-        width,
-        height,
-    );
+    if beside.is_empty() {
+        return (None, inner);
+    }
+    // Keep the picture and its caption together when the pane is very wide.
+    let art = Rect {
+        x: inner.x,
+        ..beside
+    };
+    let text_x = art.right() + 2;
+    let height = inner.height.min(6);
     let info = Rect::new(
-        inner.x,
-        inner.y + band + 1,
-        inner.width,
-        inner.height.saturating_sub(band + 1),
+        text_x,
+        inner.y + (inner.height - height) / 2,
+        inner.right() - text_x,
+        height,
     );
     (Some(art), info)
 }
@@ -5716,19 +5767,22 @@ mod tests {
         let (commands, mut requests) = mpsc::channel(8);
         // Cross each breakpoint in both directions while keeping the same
         // image protocol and input state, as a real tmux resize would.
-        for (width, height, columns, art) in [
-            (99, 28, false, true),
-            (99, 27, true, true),
-            (99, 24, true, true),
-            (99, 20, true, true),
-            (99, 14, true, true),
-            (99, 12, true, true),
-            (72, 24, true, true),
-            (71, 24, false, false),
-            (40, 12, false, false),
-            (120, 20, true, true),
-            (120, 28, false, true),
-            (99, 24, true, true),
+        for (width, height, columns) in [
+            (99, 28, false),
+            (99, 27, true),
+            (99, 24, true),
+            (99, 20, true),
+            (99, 14, true),
+            (99, 12, true),
+            (72, 12, true),
+            (72, 24, true),
+            (71, 24, false),
+            (61, 30, false),
+            (61, 24, false),
+            (40, 12, false),
+            (120, 20, true),
+            (120, 28, false),
+            (99, 24, true),
         ] {
             let mut terminal =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
@@ -5739,8 +5793,9 @@ mod tests {
                 }
                 terminal.draw(|f| app.draw(f)).unwrap();
                 let buffer = terminal.backend().buffer();
+                let header_y = u16::from(width >= 72 || height >= 16);
                 let row = (0..width)
-                    .map(|x| buffer[(x, 1)].symbol())
+                    .map(|x| buffer[(x, header_y)].symbol())
                     .collect::<String>();
                 assert!(row.contains("NOW PLAYING"));
                 let label = if app.focus == Focus::Library {
@@ -5749,14 +5804,14 @@ mod tests {
                     "QUEUE"
                 };
                 assert_eq!(row.contains(label), columns, "{width}x{height}: {row}");
-                assert_eq!(
+                assert!(
                     buffer
                         .content()
                         .iter()
                         .any(|cell| cell.symbol().contains("\x1bP")),
-                    art,
                     "cover at {width}x{height}"
                 );
+                assert!(app.video.area.height >= 4, "art at {width}x{height}");
                 if columns {
                     let text = buffer
                         .content()
@@ -5774,14 +5829,13 @@ mod tests {
                     app.input = Some(input);
                     assert!(!app.cover_hidden());
                     terminal.draw(|f| app.draw(f)).unwrap();
-                    assert_eq!(
+                    assert!(
                         terminal
                             .backend()
                             .buffer()
                             .content()
                             .iter()
                             .any(|cell| cell.symbol().contains("\x1bP")),
-                        art,
                         "cover with input at {width}x{height}"
                     );
                 }
@@ -5795,11 +5849,7 @@ mod tests {
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect();
-                assert_eq!(
-                    text.contains("\x1bP"),
-                    art,
-                    "theme cover at {width}x{height}"
-                );
+                assert!(text.contains("\x1bP"), "theme cover at {width}x{height}");
                 assert!(text.contains("COLOR THEME"));
                 assert!(text.contains("Enter save"));
                 app.theme_key(KeyCode::Esc);
@@ -6305,7 +6355,7 @@ mod tests {
     }
 
     #[test]
-    fn live_streams_label_the_cover_slot_as_streaming() {
+    fn live_streams_label_the_cover_slot_and_keep_tiny_players_readable() {
         let mut app = navigation_app(1);
         app.show_art = true;
         let mut track = app.tracks[0].clone();
@@ -6319,7 +6369,13 @@ mod tests {
         app.tracks[0] = track.clone();
         app.state.queue[0] = QueueItem::new(track);
         app.state.current_id = Some(app.state.queue[0].id.clone());
-        for (width, height) in [(120, 36), (100, 24), (72, 12)] {
+        for (width, height, label) in [
+            (120, 36, true),
+            (100, 24, true),
+            (72, 12, true),
+            (40, 12, false),
+            (61, 14, false),
+        ] {
             let mut terminal =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| app.draw(frame)).unwrap();
@@ -6330,10 +6386,12 @@ mod tests {
                 .iter()
                 .map(|cell| cell.symbol())
                 .collect();
-            assert!(
+            assert_eq!(
                 text.contains("Live stream"),
+                label,
                 "the cover slot labels streams at {width}x{height}"
             );
+            assert!(text.contains("Example Radio"));
             assert!(
                 !text.contains("No album art"),
                 "streams are not missing artwork at {width}x{height}"
@@ -6473,6 +6531,7 @@ mod tests {
     #[test]
     fn fullscreen_keys_preserve_playback_filters_and_modal_ownership() {
         let mut app = youtube_app(PlaybackStatus::Playing);
+        app.show_art = true;
         app.state.queue = vec![QueueItem::new(app.tracks[0].clone())];
         app.state.current_id = Some(app.state.queue[0].id.clone());
         app.video = video::View::with_test_frame();
@@ -6534,6 +6593,7 @@ mod tests {
     #[test]
     fn fullscreen_follows_track_changes_into_saved_video() {
         let mut app = youtube_app(PlaybackStatus::Paused);
+        app.show_art = true;
         let mut first = app.tracks[0].clone();
         first.video = true;
         let mut second = first.clone();
@@ -6586,6 +6646,55 @@ mod tests {
         app.state.status = PlaybackStatus::Stopped;
         app.sync_video();
         assert!(app.video_fullscreen.is_none());
+    }
+
+    #[test]
+    fn fullscreen_starts_without_an_inline_frame_even_below_the_browser_minimum() {
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let mut app = youtube_app(PlaybackStatus::Paused);
+        app.show_art = true;
+        app.tracks[0].video = true;
+        app.state.queue = vec![QueueItem::new(app.tracks[0].clone())];
+        app.state.current_id = Some(app.state.queue[0].id.clone());
+        let (commands, _requests) = mpsc::channel(8);
+        for (width, height) in [(61, 24), (40, 12), (39, 11), (20, 6), (1, 1)] {
+            app.video = video::View::with_test_worker();
+            app.video_fullscreen = None;
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal.draw(|f| app.draw(f)).unwrap();
+            app.sync_video();
+            assert!(!app.video.has_frame());
+            assert!(app.can_fullscreen(), "{width}x{height}");
+            app.key(key(KeyCode::Char('F')), &commands).unwrap();
+            // The event loop synchronizes both before and after drawing.
+            app.sync_video();
+            assert!(app.video_fullscreen.is_some());
+            terminal.draw(|f| app.draw(f)).unwrap();
+            app.sync_video();
+            assert!(app.video_fullscreen.is_some());
+            assert!(!app.video.area.is_empty(), "{width}x{height}");
+            assert!(app.video.reserves_area());
+            assert!(!app.spectrum_visible());
+            app.key(key(KeyCode::Esc), &commands).unwrap();
+            terminal.draw(|f| app.draw(f)).unwrap();
+            app.sync_video();
+            assert!(app.video_fullscreen.is_none());
+            if width < 40 || height < 12 {
+                assert!(app.video.area.is_empty());
+            }
+        }
+        for status in [PlaybackStatus::Stopped, PlaybackStatus::Paused] {
+            app.state.status = status;
+            app.connected = status == PlaybackStatus::Stopped;
+            app.key(key(KeyCode::Char('F')), &commands).unwrap();
+            assert!(app.video_fullscreen.is_none());
+        }
+        app.connected = true;
+        app.video.enabled = false;
+        assert!(!app.can_fullscreen(), "explicit cover mode");
+        app.video = video::View::default();
+        assert!(!app.can_fullscreen(), "no video graphics worker");
     }
 
     #[test]
@@ -8669,7 +8778,7 @@ mod tests {
         assert_eq!(shape(1.0).size(60, 20), (40, 20));
         // A 16:9 thumbnail widens the slot instead of losing its sides.
         assert_eq!(shape(16.0 / 9.0).size(60, 20), (60, 17));
-        // The narrow player caps the slot at the space above the info block.
+        // A short band fits the full picture within the available rows.
         assert_eq!(shape(16.0 / 9.0).size(57, 11), (39, 11));
         // Portrait covers stay inside the box, and tiny boxes clamp to one cell.
         assert_eq!(shape(0.5).size(60, 20), (20, 20));
@@ -8680,11 +8789,11 @@ mod tests {
         let (cover, info) = now_playing_regions(inner, true, shape(16.0 / 9.0));
         let cover = cover.expect("art is shown");
         assert!(
-            cover.y > inner.y && cover.y + cover.height < info.y - 1,
+            cover.y > inner.y && cover.bottom() < info.y,
             "the artwork sits between the panel edge and the info block: {cover:?} {info:?}"
         );
         let above = cover.y - inner.y;
-        let below = info.y - 1 - (cover.y + cover.height);
+        let below = info.y - cover.bottom();
         assert!(
             above.abs_diff(below) <= 1,
             "the gaps above and below the artwork match within rounding: {above} vs {below}"
@@ -8694,6 +8803,51 @@ mod tests {
             cover.width > square.expect("art is shown").width,
             "a wide cover gets more room than a square one"
         );
+    }
+
+    #[test]
+    fn pictures_keep_useful_space_from_small_square_panes_to_large_terminals() {
+        let mut app = app();
+        app.show_art = true;
+        for (image_width, image_height) in [(160, 90), (100, 100), (90, 160)] {
+            app.cover_image = Some(image::DynamicImage::new_rgb8(image_width, image_height));
+            for (width, height, min_rows) in [
+                (40, 12, 4),
+                (61, 24, 10),
+                (61, 30, 10),
+                (72, 12, 5),
+                (72, 24, 8),
+                (120, 28, 9),
+                (160, 50, 20),
+                (320, 100, 40),
+            ] {
+                let mut terminal =
+                    Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| app.draw(f)).unwrap();
+                let area = app.video.area;
+                assert!(
+                    area.height >= min_rows,
+                    "{image_width}x{image_height} at {width}x{height}: {area:?}"
+                );
+                assert!(app.browser_viewport_rows >= 3, "a complete list item fits");
+                let shape = app.cover_shape();
+                let expected_width =
+                    f32::from(area.height) * shape.aspect * f32::from(shape.cell.1)
+                        / f32::from(shape.cell.0);
+                assert!((f32::from(area.width) - expected_width).abs() <= 2.0);
+                if width == 320 && image_width == 160 {
+                    assert!(u32::from(area.width) * u32::from(shape.cell.0) > 854);
+                    assert!(u32::from(area.height) * u32::from(shape.cell.1) > 480);
+                }
+                app.spectrum.enabled = true;
+                terminal.draw(|f| app.draw(f)).unwrap();
+                assert!(
+                    app.video.area.height >= 4,
+                    "media survives spectrum at {width}x{height}"
+                );
+                app.spectrum.enabled = false;
+            }
+        }
     }
 
     #[test]
@@ -8848,7 +9002,7 @@ mod tests {
 
     #[test]
     fn pixel_cover_stays_with_search_and_themes_but_hides_under_help() {
-        use ratatui_image::{FontSize, ResizeEncodeRender, picker::ProtocolType};
+        use ratatui_image::{FontSize, picker::ProtocolType};
 
         let mut app = app();
         app.show_art = true;
@@ -8866,12 +9020,13 @@ mod tests {
         let (tx, rx) = sync_mpsc::channel();
         app.cover = Cover::new(tx, None);
         app.cover.replace_protocol(protocol);
-        app.cover
-            .resize_encode(&crate::cover::COVER_RESIZE.clone(), (18, 9).into());
-        app.cover
-            .update_resized_protocol(rx.recv().unwrap().resize_encode());
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 36)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        while let Ok(request) = rx.try_recv() {
+            app.cover.update_resized_protocol(request.resize_encode());
+        }
+        let origin = (app.video.area.x, app.video.area.y);
         for (help, input, visible) in [
             (false, None, true),
             (true, None, false),
@@ -8883,7 +9038,7 @@ mod tests {
             app.input = input;
             terminal.draw(|frame| app.draw(frame)).unwrap();
             assert_eq!(
-                terminal.backend().buffer()[(1, 2)]
+                terminal.backend().buffer()[origin]
                     .symbol()
                     .contains("\x1bP"),
                 visible
@@ -8892,14 +9047,14 @@ mod tests {
         app.open_theme_picker();
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert!(
-            terminal.backend().buffer()[(1, 2)]
+            terminal.backend().buffer()[origin]
                 .symbol()
                 .contains("\x1bP")
         );
         app.theme_key(KeyCode::Esc);
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert!(
-            terminal.backend().buffer()[(1, 2)]
+            terminal.backend().buffer()[origin]
                 .symbol()
                 .contains("\x1bP")
         );

@@ -412,6 +412,12 @@ impl Default for View {
 }
 impl View {
     #[cfg(test)]
+    pub(super) fn with_test_worker() -> Self {
+        let mut view = Self::default();
+        view.sender = Some(watch::channel(None).0);
+        view
+    }
+    #[cfg(test)]
     pub(super) fn with_test_waiting() -> Self {
         let mut view = Self::default();
         view.waiting = true;
@@ -498,6 +504,13 @@ impl View {
     }
     pub fn has_frame(&self) -> bool {
         self.frame.is_some()
+    }
+    pub fn can_fullscreen(&self, track: &Track) -> bool {
+        self.enabled
+            && (self.has_frame()
+                || (track.video
+                    && self.sender.is_some()
+                    && (self.request.is_none() || self.waiting)))
     }
     pub fn reserves_area(&self) -> bool {
         self.enabled && (self.waiting || self.frame.is_some())
@@ -1471,6 +1484,39 @@ mod tests {
             Rgba([0; 4]),
         );
         assert!(!view.reserves_area());
+    }
+
+    #[test]
+    fn fullscreen_availability_includes_saved_video_before_its_first_frame() {
+        let mut view = View::with_test_worker();
+        let mut item = item();
+        assert!(!view.can_fullscreen(&item.track), "audio-only track");
+        item.track.video = true;
+        assert!(view.can_fullscreen(&item.track), "no inline area yet");
+        view.area = Rect::new(0, 0, 16, 5);
+        view.sync(
+            Some(&item),
+            PlaybackStatus::Paused,
+            true,
+            true,
+            0,
+            Rgba([0; 4]),
+        );
+        assert!(view.can_fullscreen(&item.track), "first frame pending");
+        for result in [Ok(None), Err("decoder failed".into())] {
+            view.mailbox.put(Packet {
+                generation: view.generation,
+                waiting: false,
+                ended: false,
+                result,
+            });
+            view.accept();
+            assert!(!view.can_fullscreen(&item.track), "confirmed unavailable");
+        }
+        view.enabled = false;
+        view.request = None;
+        assert!(!view.can_fullscreen(&item.track), "explicit cover mode");
+        assert!(!View::default().can_fullscreen(&item.track), "no worker");
     }
 
     #[test]

@@ -86,7 +86,11 @@ For one video, enable **Time range** in the TUI download options, or use
 see [time range downloads](imports.md#download-a-time-range).
 The TUI asks before downloading video and automatically plays saved video in the
 cover area on macOS with Kitty/Sixel graphics. Press `w` to switch video/cover
-and save that preference. `F` during video fills the current terminal pane,
-with elapsed / total time at the bottom right. `F`/`Esc` returns, and fullscreen
+and save that preference. The picture grows with the pane and moves beside or
+above the controls according to available space, including at 40 × 12 cells.
+`F` for saved video fills the current terminal pane even while the first frame
+is pending or the inline picture has no room. Fullscreen also fits below the
+browser's 40 × 12 minimum, with a compact return hint and clock.
+`F`/`Esc` returns, and fullscreen
 is not saved. Audio remains in the server and keeps playing
 when the TUI exits. See [video imports and playback](imports.md#terminal-video-macos).

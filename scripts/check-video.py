@@ -173,7 +173,7 @@ if a[a.index('-f')+1].startswith('bestvideo'):
  shutil.copyfile(base/'picture.mkv',str(out).replace('%(ext)s','mkv'))
 else:
  shutil.copyfile(base/'audio.m4a',str(out).replace('%(ext)s','m4a'))
- shutil.copyfile(base/'art.png',str(out).replace('%(ext)s','png'))
+ if 'VIDEO000001' in a[-1]: shutil.copyfile(base/'art.png',str(out).replace('%(ext)s','png'))
 ''')
         downloader.chmod(0o700)
         (home / "imports.json").write_text(json.dumps({"youtube": {
@@ -243,7 +243,7 @@ while True:
                      shlex.join([sys.executable, str(logger), str(timings)])], env=env)
                 command = shlex.join(["/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
                                       *map(str, tmux), "attach-session", "-t", "video"])
-                ghostty = bridge("launch", GHOSTTY, "--window-width=120", "--window-height=28",
+                ghostty = bridge("launch", GHOSTTY, "--window-width=200", "--window-height=60", "--font-size=9",
                                  "--window-save-state=never", "--window-inherit-font-size=false",
                                  "--background-opacity=1", "--confirm-close-surface=false",
                                  f"--title=vtamp video check · {fps} fps", f"--command={command}")["pid"]
@@ -252,8 +252,8 @@ while True:
                 run([*tmux, "resize-window", "-t", "video:0", "-x", 100, "-y", 24], env=env)
                 client_size = run([*tmux, "list-clients", "-F", "#{client_width} #{client_height}"], env=env)
                 columns, rows = map(int, client_size.split())
-                if columns < 120 or rows < 28:
-                    raise RuntimeError("The 120×28 test window does not fit; reduce Ghostty font size")
+                if columns < 200 or rows < 60:
+                    raise RuntimeError("The 200×60 test window does not fit; reduce Ghostty font size")
                 ready.touch()
                 def events():
                     return [json.loads(line) for line in timings.read_text().splitlines() if line.endswith('}')] if timings.exists() else []
@@ -358,9 +358,11 @@ while True:
                 fullscreen_frames = [f for f in frames() if f['at'] > fullscreen_at]
                 summaries[-1]['fullscreen_upload_fps'] = len(fullscreen_frames) / fullscreen_elapsed
                 assert abs(summaries[-1]['fullscreen_upload_fps'] - fps) < 2
-                for columns, rows in [(40, 12), (72, 14), (120, 28), (100, 24)]:
+                for columns, rows in [(40, 12), (61, 24), (72, 14), (120, 28), (200, 60), (100, 24)]:
                     run([*tmux, "resize-window", "-t", "video:0", "-x", columns, "-y", rows], env=env)
-                    wait_for(lambda: "Loading video" not in capture(), "video after fullscreen resize")
+                    start_frames = len(frames())
+                    wait_for(lambda: len(frames()) > start_frames + 2 and '\U0010eeee' in capture(),
+                             "video after fullscreen resize")
                     time.sleep(.3)
                     assert re.search(r'\d{2,}:\d{2} / 03:00\s*$', capture()), 'Fullscreen time is clipped'
                     run(["screencapture", "-x", "-o", "-l", window['id'], output / f"fullscreen-{columns}-{rows}-{fps}.png"])
@@ -387,6 +389,8 @@ while True:
                         wait_for(lambda: 'F/Esc back' in capture(), 'fullscreen continues on next video')
                     else:
                         wait_for(lambda: 'NOW PLAYING' in capture() and 'F/Esc back' not in capture(), 'normal layout on audio-only track')
+                        wait_for(lambda: 'No album art' in capture(), 'missing art label')
+                        run(['screencapture', '-x', '-o', '-l', window['id'], output / f'missing-art-{fps}.png'])
                 vt('play', '--track', track)
                 start_frames = len(frames())
                 wait_for(lambda: len(frames()) > start_frames + 2, 'video before natural ending')
@@ -470,11 +474,63 @@ while True:
                 for selected in [audio_track, track, audio_track, track]:
                     vt("play", "--track", selected)
                 time.sleep(.5)
-                for columns, rows in [(40, 12), (72, 14), (120, 28), (100, 24)]:
+                sizes = [(40, 12), (61, 14), (61, 24), (61, 30), (71, 24),
+                         (72, 12), (72, 14), (120, 28), (200, 60), (100, 24)]
+                summaries[-1]['picture_sizes'] = []
+                for columns, rows in sizes:
                     run([*tmux, "resize-window", "-t", "video:0", "-x", columns, "-y", rows], env=env)
                     time.sleep(.4)
+                    start_frames = len(frames())
+                    wait_for(lambda: len(frames()) > start_frames + 2, 'video after resize')
+                    picture_rows = [line.count('\U0010eeee') for line in capture().splitlines()
+                                    if '\U0010eeee' in line]
+                    assert len(picture_rows) >= 4, f'Picture too short at {columns}×{rows}'
+                    summaries[-1]['picture_sizes'].append({
+                        'pane': [columns, rows], 'picture': [max(picture_rows), len(picture_rows)]})
                     if fps == rates[-1]:
                         run(["screencapture", "-x", "-o", "-l", window['id'], output / f"size-{columns}-{rows}-{fps}.png"])
+                # Covers use the same responsive slots and keep their pixels
+                # when the compact browser is occupied by the theme picker.
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 'w'], env=env)
+                wait_for(lambda: 'Video off' in capture(), 'cover mode')
+                for columns, rows in [(40, 12), (61, 24), (200, 60), (72, 12)]:
+                    run([*tmux, 'resize-window', '-t', 'video:0', '-x', columns, '-y', rows], env=env)
+                    time.sleep(.3)
+                    wait_for(lambda: '\U0010eeee' in capture(), 'cover after resize')
+                    run(['screencapture', '-x', '-o', '-l', window['id'], output / f'cover-{columns}-{rows}-{fps}.png'])
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 't'], env=env)
+                wait_for(lambda: 'COLOR THEME' in capture() and 'Enter save' in capture(), 'compact theme picker')
+                run(['screencapture', '-x', '-o', '-l', window['id'], output / f'theme-72-12-{fps}.png'])
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 'Escape'], env=env)
+                wait_for(lambda: 'COLOR THEME' not in capture(), 'theme picker closed')
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 'w'], env=env)
+                wait_for(lambda: 'Video on' in capture(), 'video mode')
+                # An absent inline frame must still allow fullscreen below the
+                # browser minimum, including after the old decoder is cleared.
+                for columns, rows in [(39, 11), (20, 6)]:
+                    run([*tmux, 'resize-window', '-t', 'video:0', '-x', columns, '-y', rows], env=env)
+                    wait_for(lambda: 'F fullscreen' in capture() and '\U0010eeee' not in capture(), 'small-pane fullscreen hint')
+                    run([*tmux, 'send-keys', '-t', 'video:0.0', 'F'], env=env)
+                    wait_for(lambda: 'F/Esc' in capture() and '\U0010eeee' in capture(), 'fullscreen without an inline frame')
+                    time.sleep(.3)
+                    run(['screencapture', '-x', '-o', '-l', window['id'], output / f'fullscreen-{columns}-{rows}-{fps}.png'])
+                    run([*tmux, 'send-keys', '-t', 'video:0.0', 'Escape'], env=env)
+                    wait_for(lambda: 'F fullscreen' in capture(), 'back to small-pane notice')
+                run([*tmux, 'resize-window', '-t', 'video:0', '-x', 100, '-y', 24], env=env)
+                wait_for(lambda: '\U0010eeee' in capture(), 'video after restoring pane')
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 'v'], env=env)
+                for columns, rows in [(61, 24), (200, 60)]:
+                    run([*tmux, 'resize-window', '-t', 'video:0', '-x', columns, '-y', rows], env=env)
+                    start_frames = len(frames())
+                    wait_for(lambda: len(frames()) > start_frames + 2 and 'SPECTRUM' in capture(), 'video with spectrum')
+                    time.sleep(.3)
+                    run(['screencapture', '-x', '-o', '-l', window['id'], output / f'spectrum-{columns}-{rows}-{fps}.png'])
+                run([*tmux, 'send-keys', '-t', 'video:0.0', 'v'], env=env)
+                wait_for(lambda: 'SPECTRUM' not in capture(), 'spectrum closed')
+                run([*tmux, 'resize-window', '-t', 'video:0', '-x', 100, '-y', 24], env=env)
+                start_frames = len(frames())
+                wait_for(lambda: len(frames()) > start_frames + 2 and 'NOW PLAYING' in capture(),
+                         'normal layout before detach')
                 run([*tmux, "send-keys", "-t", "video:0.0", "q"], env=env)
                 wait_for(lambda: subprocess.run(["kill", "-0", pane_pid], capture_output=True).returncode != 0, "TUI exit")
                 assert vt("status")['status'] == 'playing', "Detaching stopped music"
